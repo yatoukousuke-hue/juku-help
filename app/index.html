@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#4f46e5">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="質問・プリント">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<title>質問・プリント</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app" id="app"></div>
+
+<script src="config.js"></script>
+<script src="lib/supabase.js"></script>
+<script src="common.js"></script>
+<script>
+(function () {
+  'use strict';
+  const { $, $$, esc, fmtTime, elapsedText, KIND_LABEL, KIND_ICON, STATUS_LABEL, URGENCY_LABEL, errorText, toast, deviceId, store, api } = window.JH;
+  const C = window.APP_CONFIG;
+  const app = $('#app');
+  const DEV = deviceId();
+
+  // ---- 状態 ----
+  let mode = store.get('jh_mode', null);            // 'personal' | 'shared'
+  let profile = store.get('jh_profile', null);      // {student_id, student_name, grade, classroom, seat}
+  let roster = store.get('jh_roster', []);
+  let view = 'home';
+  let form = null;                                   // 入力中の依頼
+  let myList = [];
+  let pollTimer = null;
+  let lastReceipt = null;
+
+  JH.demoBanner();
+
+  async function loadRoster() {
+    try { roster = await api.listStudents(); store.set('jh_roster', roster); }
+    catch (e) { if (!roster.length) toast(errorText(e), 'error'); }
+  }
+
+  // ---- 画面の描画 ----
+  function render() {
+    stopPolling();
+    if (!mode) return renderModeSelect();
+    if (view === 'home') return renderHome();
+    if (view === 'form') return renderForm();
+    if (view === 'receipt') return renderReceipt();
+  }
+
+  function header() {
+    return `<div class="topbar">
+      <div><h1>${esc(C.APP_NAME)}</h1>${C.JUKU_NAME ? `<div class="sub">${esc(C.JUKU_NAME)}</div>` : ''}</div>
+      <button class="iconbtn" id="btnSettings" title="設定">⚙</button>
+    </div>`;
+  }
+
+  function renderModeSelect() {
+    app.innerHTML = `${header()}
+      <div class="card mode-choice">
+        <h2>この端末は？</h2>
+        <p class="muted small">あとで右上の ⚙ から変更できます。</p>
+        <button class="btn big block" id="modePersonal">📱 自分の端末<span class="d">名前・教室・席を記憶して、次から自動で入力します</span></button>
+        <button class="btn big block ghost" id="modeShared">🏫 みんなで使う端末<span class="d">送信するたびに入力を消します（前の人の情報が残りません）</span></button>
+      </div>`;
+    $('#modePersonal').onclick = () => { setMode('personal'); };
+    $('#modeShared').onclick = () => { setMode('shared'); };
+    $('#btnSettings').onclick = () => {};
+  }
+  function setMode(m) {
+    mode = m; store.set('jh_mode', m);
+    if (m === 'shared') { profile = null; store.del('jh_profile'); }
+    view = 'home'; render();
+  }
+
+  function renderHome() {
+    const isPersonal = mode === 'personal';
+    app.innerHTML = `${header()}
+      ${isPersonal && profile ? `<div class="card small"><span class="muted">あなた：</span><b>${esc(profile.student_name)}</b>${profile.grade ? `（${esc(profile.grade)}）` : ''}　${esc(profile.classroom || '')} ${profile.seat ? esc(profile.seat) + '番' : ''}
+        <button class="btn-link small" id="btnEditProfile">変更</button></div>` : ''}
+      <button class="btn big block" id="btnPrint" style="margin-bottom:12px">📄 プリントがほしい</button>
+      <button class="btn big block" id="btnQuestion" style="margin-bottom:20px">✋ 質問したい</button>
+
+      ${isPersonal ? `<div class="section-title">あなたの依頼（今日）</div><div class="card" id="myList"><div class="muted small">読み込み中…</div></div>`
+                   : `<div class="section-title">自分の依頼を確認する</div>
+                      <div class="card"><div class="row"><input class="input" id="receiptInput" type="number" inputmode="numeric" placeholder="受付番号" style="flex:1"><button class="btn" id="btnLookup">確認</button></div>
+                      <div id="lookupResult" class="mt"></div></div>`}
+      <div class="center small muted" style="margin-top:24px">${isPersonal ? '📱 自分の端末モード' : '🏫 みんなで使う端末モード'}</div>`;
+    $('#btnPrint').onclick = () => startForm('print');
+    $('#btnQuestion').onclick = () => startForm('question');
+    $('#btnSettings').onclick = openSettings;
+    if ($('#btnEditProfile')) $('#btnEditProfile').onclick = () => { profile = null; store.del('jh_profile'); render(); };
+    if (isPersonal) { refreshMyList(); startPolling(refreshMyList); }
+    else {
+      $('#btnLookup').onclick = lookupReceipt;
+      $('#receiptInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') lookupReceipt(); });
+      if (lastReceipt) { $('#receiptInput').value = lastReceipt; lookupReceipt(); }
+    }
+  }
+
+  function reqCard(r, allowCancel) {
+    const st = r.status;
+    const ahead = st === 'waiting' ? `あと ${r.ahead} 人待ち` : st === 'in_progress' ? '講師が対応中です' : st === 'done' ? `完了 ${fmtTime(r.done_at)}` : '取り消しました';
+    return `<div class="myreq" data-id="${r.id}">
+      <div class="line1"><span>#${r.receipt_no}</span><span>${KIND_ICON[r.kind]} ${esc(r.subject)} ${KIND_LABEL[r.kind]}</span>
+        ${r.urgency === 'now' ? '<span class="badge now">すぐ</span>' : ''}<span class="spacer"></span><span class="badge ${st}">${STATUS_LABEL[st]}</span></div>
+      <div class="line2">${esc(r.content || '')}${r.copies ? ` ×${r.copies}枚` : ''}</div>
+      <div class="line2">${ahead}　・　送信 ${fmtTime(r.created_at)}（${elapsedText(r.created_at)}前）</div>
+      ${allowCancel && st === 'waiting' ? `<div><button class="btn danger sm" data-cancel="${r.id}">取り消す</button></div>` : ''}
+    </div>`;
+  }
+  async function refreshMyList() {
+    try {
+      myList = await api.myRequests(DEV);
+      const box = $('#myList'); if (!box) return;
+      const today = myList.filter((r) => r.status !== 'cancelled' || JH.minutesSince(r.done_at) < 10);
+      box.innerHTML = today.length ? today.map((r) => reqCard(r, true)).join('') : '<div class="muted small">まだ依頼はありません</div>';
+      bindCancel(box);
+    } catch (e) { const box = $('#myList'); if (box) box.innerHTML = `<div class="small" style="color:var(--danger)">${esc(errorText(e))}</div>`; }
+  }
+  function bindCancel(root) {
+    $$('[data-cancel]', root).forEach((b) => b.onclick = async () => {
+      if (!confirm('この依頼を取り消しますか？')) return;
+      b.disabled = true;
+      try { await api.cancelRequest(Number(b.dataset.cancel), DEV); toast('取り消しました'); if (mode === 'personal') refreshMyList(); else lookupReceipt(); }
+      catch (e) { toast(errorText(e), 'error'); b.disabled = false; }
+    });
+  }
+  async function lookupReceipt() {
+    const no = Number($('#receiptInput').value);
+    const box = $('#lookupResult');
+    if (!no) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="muted small">確認中…</div>';
+    try {
+      const r = await api.requestByReceipt(no);
+      if (!r) { box.innerHTML = '<div class="muted small">今日の受付番号にその番号はありません</div>'; return; }
+      box.innerHTML = `<div class="small muted">${esc(r.student_name)} さんの依頼</div>` + reqCard(r, true);
+      bindCancel(box);
+      lastReceipt = no;
+      startPolling(lookupReceipt);
+    } catch (e) { box.innerHTML = `<div class="small" style="color:var(--danger)">${esc(errorText(e))}</div>`; }
+  }
+  function startPolling(fn) { stopPolling(); pollTimer = setInterval(() => { if (document.visibilityState === 'visible') fn(); }, (C.REFRESH_SEC_STUDENT || 10) * 1000); }
+  function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+
+  // ---- 入力フォーム ----
+  function startForm(kind) {
+    const p = (mode === 'personal' && profile) ? profile : {};
+    form = {
+      kind, student_id: p.student_id ?? null, student_name: p.student_name || '', grade: p.grade || '', other: !!p.other,
+      classroom: p.classroom || (C.CLASSROOMS.length === 1 ? C.CLASSROOMS[0] : ''), seat: p.seat || '',
+      subject: '', content: '', copies: null, urgency: 'later',
+      whoDone: !!(mode === 'personal' && profile && profile.student_name), pickGrade: p.grade || '',
+    };
+    view = 'form'; render();
+    window.scrollTo(0, 0);
+  }
+  function renderForm() {
+    const f = form;
+    const isPrint = f.kind === 'print';
+    const chips = (list, cur, attr, cls) => list.map((v) => `<button class="chip ${cls || ''} ${cur === v ? 'selected' : ''}" data-${attr}="${esc(v)}">${esc(v)}</button>`).join('');
+    const grade = f.pickGrade;
+    const names = grade ? roster.filter((s) => s.grade === grade) : [];
+
+    app.innerHTML = `<div class="topbar"><button class="btn ghost sm" id="btnBack">← もどる</button><h1>${KIND_ICON[f.kind]} ${isPrint ? 'プリントがほしい' : '質問したい'}</h1><span></span></div>
+      <div class="card">
+        <div class="step"><span class="num">1</span>だれ？</div>
+        ${f.whoDone ? `<div class="row"><b>${esc(f.student_name)}</b>${f.grade ? `（${esc(f.grade)}）` : ''}<button class="btn-link small" id="btnChangeWho">変更</button></div>` : `
+          <div class="chips" id="gradeChips">${chips(C.GRADES, grade, 'grade')}</div>
+          <div class="row mt"><input class="input" id="noInput" inputmode="numeric" placeholder="生徒番号で探す" style="flex:1"></div>
+          <div class="chips names mt" id="nameChips">${names.length ? names.map((s) => `<button class="chip ${f.student_id === s.id ? 'selected' : ''}" data-sid="${s.id}">${esc(s.name)}</button>`).join('') : '<div class="muted small">学年を選ぶと名前が出ます</div>'}</div>
+          <div class="mt"><button class="chip ${f.other ? 'selected' : ''}" id="btnOther">その他（名前を入力）</button></div>
+          ${f.other ? `<input class="input mt" id="otherName" placeholder="名前を入力" value="${esc(f.student_name)}">` : ''}
+        `}
+
+        <div class="step"><span class="num">2</span>どこ？</div>
+        <div class="chips" id="roomChips">${chips(C.CLASSROOMS, f.classroom, 'room')}</div>
+        <div class="row mt"><span>席番号</span><input class="input" id="seatInput" type="${C.SEAT_INPUT === 'number' ? 'number' : 'text'}" inputmode="${C.SEAT_INPUT === 'number' ? 'numeric' : 'text'}" placeholder="例: 12" value="${esc(f.seat)}" style="width:120px"><span class="muted small">${C.SEAT_REQUIRED ? '' : '（分かれば）'}</span></div>
+
+        <div class="step"><span class="num">3</span>教科</div>
+        <div class="chips" id="subjChips">${chips(C.SUBJECTS, f.subject, 'subj')}</div>
+
+        <div class="step"><span class="num">4</span>${isPrint ? '内容' : '質問の内容'}</div>
+        <textarea class="input" id="contentInput" maxlength="200" placeholder="${isPrint ? '例: 一次関数の復習プリント、さっきの小テストの解き直し' : '（任意）例: テキストp.32の問3'}">${esc(f.content)}</textarea>
+        ${isPrint ? `<div class="row mt"><span>枚数（任意）</span><div class="chips" id="copiesChips">${[1, 2, 3, 5].map((n) => `<button class="chip ${f.copies === n ? 'selected' : ''}" data-copies="${n}">${n}枚</button>`).join('')}</div></div>`
+                  : `<div class="chips mt" id="urgChips"><button class="chip wide danger ${f.urgency === 'now' ? 'selected' : ''}" data-urg="now">🔴 すぐ来てほしい</button><button class="chip wide ${f.urgency === 'later' ? 'selected' : ''}" data-urg="later">あとででOK</button></div>`}
+
+        <button class="btn big block mt" id="btnSubmit" style="margin-top:22px">送信する</button>
+      </div>`;
+
+    // 入力値の保持
+    const keep = () => {
+      f.seat = $('#seatInput').value.trim();
+      f.content = $('#contentInput').value;
+      if ($('#otherName')) f.student_name = $('#otherName').value;
+    };
+    const rerender = () => { keep(); renderForm(); };
+
+    $('#btnBack').onclick = () => { view = 'home'; render(); };
+    if ($('#btnChangeWho')) $('#btnChangeWho').onclick = () => { keep(); f.whoDone = false; f.student_id = null; f.student_name = ''; f.other = false; renderForm(); };
+    $$('#gradeChips .chip').forEach((b) => b.onclick = () => { keep(); f.pickGrade = b.dataset.grade; f.student_id = null; f.other = false; f.student_name = ''; renderForm(); });
+    $$('#nameChips .chip').forEach((b) => b.onclick = () => { keep(); const s = roster.find((x) => x.id === Number(b.dataset.sid)); f.student_id = s.id; f.student_name = s.name; f.grade = s.grade; f.other = false; f.whoDone = true; renderForm(); });
+    if ($('#btnOther')) $('#btnOther').onclick = () => { keep(); f.other = true; f.student_id = null; f.student_name = ''; f.grade = f.pickGrade; renderForm(); $('#otherName').focus(); };
+    if ($('#noInput')) $('#noInput').addEventListener('input', (e) => {
+      const v = e.target.value.trim(); if (!v) return;
+      const s = roster.find((x) => x.student_no === v);
+      if (s) { keep(); f.student_id = s.id; f.student_name = s.name; f.grade = s.grade; f.other = false; f.whoDone = true; renderForm(); }
+    });
+    $$('#roomChips .chip').forEach((b) => b.onclick = () => { keep(); f.classroom = b.dataset.room; renderForm(); });
+    $$('#subjChips .chip').forEach((b) => b.onclick = () => { keep(); f.subject = b.dataset.subj; renderForm(); });
+    $$('#copiesChips .chip').forEach((b) => b.onclick = () => { keep(); const n = Number(b.dataset.copies); f.copies = f.copies === n ? null : n; renderForm(); });
+    $$('#urgChips .chip').forEach((b) => b.onclick = () => { keep(); f.urgency = b.dataset.urg; renderForm(); });
+    $('#btnSubmit').onclick = () => { keep(); submit(); };
+  }
+
+  async function submit() {
+    const f = form;
+    if (f.other) f.student_name = (f.student_name || '').trim();
+    if (!f.student_id && !f.student_name) return toast('名前を選んでください', 'error');
+    if (!f.classroom) return toast('教室を選んでください', 'error');
+    if (C.SEAT_REQUIRED && !f.seat) return toast('席番号を入力してください', 'error');
+    if (!f.subject) return toast('教科を選んでください', 'error');
+    const btn = $('#btnSubmit'); btn.disabled = true; btn.textContent = '送信中…';
+    try {
+      const r = await api.createRequest({
+        device_id: DEV, student_id: f.student_id, student_name: f.student_id ? null : f.student_name, grade: f.grade,
+        classroom: f.classroom, seat: f.seat, kind: f.kind, subject: f.subject, content: f.content, copies: f.copies, urgency: f.urgency,
+      });
+      lastReceipt = r.receipt_no;
+      if (mode === 'personal') {
+        profile = { student_id: f.student_id, student_name: r.student_name, grade: f.grade, classroom: f.classroom, seat: f.seat, other: !f.student_id };
+        store.set('jh_profile', profile);
+      }
+      form = { result: r }; view = 'receipt'; render();
+    } catch (e) { toast(errorText(e), 'error'); btn.disabled = false; btn.textContent = '送信する'; }
+  }
+
+  function renderReceipt() {
+    const r = form.result;
+    app.innerHTML = `<div class="card receipt">
+        <div style="font-size:1.4rem;font-weight:800">✅ 受け付けました！</div>
+        <div class="muted mt">受付番号</div>
+        <div class="big-no">${r.receipt_no}</div>
+        <div class="pos">いま <b>${r.position}</b> 番目です</div>
+        <div class="muted small mt">${esc(r.student_name)}さん・${esc(r.classroom)}${r.seat ? ' ' + esc(r.seat) + '番' : ''}・${esc(r.subject)} ${KIND_LABEL[r.kind]}</div>
+        ${mode === 'shared' ? '<div class="small mt" style="color:var(--warn);font-weight:700">状態を確認するときは、この受付番号をおぼえておいてください</div>' : ''}
+        <button class="btn big block mt" id="btnClose" style="margin-top:24px">${mode === 'shared' ? '終わる（次の人へ）' : 'ホームにもどる'}</button>
+      </div>`;
+    $('#btnClose').onclick = () => { form = null; view = 'home'; render(); };
+    // 共有端末では一定時間で自動的にホームへ（次の生徒のため）
+    if (mode === 'shared') setTimeout(() => { if (view === 'receipt') { form = null; view = 'home'; render(); } }, 60000);
+  }
+
+  // ---- 設定 ----
+  function openSettings() {
+    const bg = document.createElement('div'); bg.className = 'modal-bg';
+    bg.innerHTML = `<div class="modal">
+      <h3>設定</h3>
+      <div class="muted small">いまのモード：${mode === 'personal' ? '📱 自分の端末' : '🏫 みんなで使う端末'}</div>
+      <button class="btn block mt ${mode === 'personal' ? 'soft' : ''}" id="sPersonal">📱 自分の端末にする</button>
+      <button class="btn block mt ${mode === 'shared' ? 'soft' : ''}" id="sShared">🏫 みんなで使う端末にする</button>
+      ${mode === 'personal' ? '<button class="btn block ghost mt" id="sClear">記憶した名前・教室・席を消す</button>' : ''}
+      <button class="btn block ghost mt" id="sReload">名簿を読み直す</button>
+      <div class="small muted mt">ホーム画面に追加すると、アプリのように開けます（iPhone: 共有ボタン → 「ホーム画面に追加」／Android: メニュー → 「ホーム画面に追加」）</div>
+      <button class="btn block ghost mt" id="sClose">閉じる</button>
+    </div>`;
+    document.body.appendChild(bg);
+    const close = () => bg.remove();
+    bg.onclick = (e) => { if (e.target === bg) close(); };
+    $('#sClose', bg).onclick = close;
+    $('#sPersonal', bg).onclick = () => { close(); setMode('personal'); };
+    $('#sShared', bg).onclick = () => { close(); setMode('shared'); };
+    if ($('#sClear', bg)) $('#sClear', bg).onclick = () => { profile = null; store.del('jh_profile'); close(); render(); toast('消しました'); };
+    $('#sReload', bg).onclick = async () => { await loadRoster(); close(); toast('名簿を読み直しました'); };
+  }
+
+  // ---- 開始 ----
+  render();
+  loadRoster();
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && view === 'home') render(); });
+})();
+</script>
+</body>
+</html>

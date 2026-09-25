@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>掲示用QRコード</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .sheet { background: #fff; border-radius: 20px; padding: 32px 24px; text-align: center; box-shadow: var(--shadow); }
+  .sheet h1 { font-size: 2rem; margin: 0 0 8px; }
+  .sheet .url { font-size: 1.6rem; font-weight: 800; word-break: break-all; margin: 16px 0; color: var(--primary-dark); }
+  #qr { display: inline-block; margin: 8px 0; }
+  #qr img, #qr canvas { width: 320px; height: 320px; image-rendering: pixelated; }
+  .steps { text-align: left; display: inline-block; font-size: 1.1rem; margin-top: 12px; }
+  @media print { .noprint { display: none; } body { background: #fff; } .sheet { box-shadow: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="card noprint">
+    <h2>掲示用ページ</h2>
+    <p class="small muted">このページを印刷して教室に貼ってください（ブラウザの「印刷」で、A4 1枚に収まります）。QRが読めない生徒には下の URL を打ち込んでもらいます。</p>
+    <label class="lbl">表示するURL（必要なら書き換え）</label>
+    <input class="input" id="url">
+    <div class="row mt">
+      <button class="btn" id="btnUpdate">QRを作り直す</button>
+      <button class="btn ghost" onclick="window.print()">🖨 印刷する</button>
+    </div>
+  </div>
+
+  <div class="sheet">
+    <h1 id="title">質問・プリント</h1>
+    <div class="muted" id="juku"></div>
+    <div id="qr"></div>
+    <div class="url" id="urlText"></div>
+    <div class="steps">
+      ① カメラでQRを読む（読めなければ上のURLを入力）<br>
+      ② 「プリントがほしい」か「質問したい」を押す<br>
+      ③ 名前・教室・席を選んで送信 → 受付番号が出ます
+    </div>
+  </div>
+</div>
+<script src="config.js"></script>
+<script src="lib/qrcode.js"></script>
+<script>
+  const C = window.APP_CONFIG;
+  document.getElementById('title').textContent = C.APP_NAME;
+  document.getElementById('juku').textContent = C.JUKU_NAME || '';
+  const base = location.href.replace(/qr\.html.*$/, '');
+  const urlInput = document.getElementById('url');
+  urlInput.value = base;
+  function draw() {
+    const url = urlInput.value.trim();
+    document.getElementById('urlText').textContent = url.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const q = qrcode(0, 'M'); q.addData(url); q.make();
+    document.getElementById('qr').innerHTML = q.createImgTag(8, 8);
+  }
+  document.getElementById('btnUpdate').onclick = draw;
+  draw();
+</script>
+</body>
+</html>

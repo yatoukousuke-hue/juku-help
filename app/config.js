@@ -6,8 +6,8 @@ window.APP_CONFIG = {
 
   // --- Supabase の接続先（手順書の「Supabase の準備」でコピーした値を貼る） ---
   // 空欄のままだと「お試しモード」（このブラウザの中だけに保存）で動きます
-  SUPABASE_URL: "",
-  SUPABASE_ANON_KEY: "",
+  SUPABASE_URL: "https://lwrjktjccutdhticabsi.supabase.co",
+  SUPABASE_ANON_KEY: "sb_publishable_eDlgtQQ5lt9zHmmZELZ_LA_P50PFTYW",
 
   // --- 表示名 ---
   APP_NAME: "質問・プリント",

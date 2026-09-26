@@ -3,3 +3,4 @@ dev/node_modules/
 dev/roster.xlsx
 dev/roster_import.json
 dev/schema_json.txt
+app/.vercel/

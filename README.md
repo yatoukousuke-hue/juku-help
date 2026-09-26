@@ -4,9 +4,9 @@
 
 ## 公開中の URL
 
-- 生徒画面：https://juku-help.vercel.app/ （予備: https://yatoukousuke-hue.github.io/juku-help/ ）
-- 講師画面：https://juku-help.vercel.app/teacher.html
-- 掲示用QR：https://juku-help.vercel.app/qr.html
+- 生徒画面：https://eimeimizutani-support.vercel.app/ （予備: https://yatoukousuke-hue.github.io/juku-help/ ）
+- 講師画面：https://eimeimizutani-support.vercel.app/teacher.html
+- 掲示用QR：https://eimeimizutani-support.vercel.app/qr.html
 
 現在の状態と更新のしかたは [docs/04_公開情報（現在の状態）.md](docs/04_公開情報（現在の状態）.md) を参照。
 

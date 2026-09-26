@@ -1,0 +1,12 @@
+{
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "rewrites": [
+    { "source": "/sensei", "destination": "/teacher.html" },
+    { "source": "/kyoushi", "destination": "/teacher.html" },
+    { "source": "/qr", "destination": "/qr.html" }
+  ],
+  "headers": [
+    { "source": "/(.*)", "headers": [ { "key": "Cache-Control", "value": "no-cache" } ] }
+  ]
+}

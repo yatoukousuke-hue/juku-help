@@ -2,9 +2,9 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "rewrites": [
-    { "source": "/sensei", "destination": "/teacher.html" },
-    { "source": "/kyoushi", "destination": "/teacher.html" },
-    { "source": "/qr", "destination": "/qr.html" }
+    { "source": "/sensei", "destination": "/teacher" },
+    { "source": "/kyoushi", "destination": "/teacher" },
+    { "source": "/qr", "destination": "/qr" }
   ],
   "headers": [
     { "source": "/(.*)", "headers": [ { "key": "Cache-Control", "value": "no-cache" } ] }

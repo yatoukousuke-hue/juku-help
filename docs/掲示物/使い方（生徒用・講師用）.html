@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>質問・プリント 使い方</title>
+<style>
+  @page { size: A4; margin: 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Yu Gothic UI", "Meiryo", "Hiragino Sans", sans-serif; color: #1c1f2e; margin: 0; }
+  .page { width: 182mm; min-height: 268mm; page-break-after: always; position: relative; }
+  .page:last-child { page-break-after: auto; }
+  h1 { font-size: 26pt; margin: 0 0 4mm; letter-spacing: .02em; }
+  h2 { font-size: 14pt; margin: 6mm 0 2mm; padding-left: 3mm; border-left: 5px solid #4f46e5; }
+  .teacher h2 { border-left-color: #0f766e; }
+  .top { display: flex; gap: 8mm; align-items: center; }
+  .top img { width: 62mm; height: 62mm; border: 1px solid #ddd; border-radius: 4mm; }
+  .url { font-size: 15pt; font-weight: 800; color: #3f37c9; word-break: break-all; }
+  .teacher .url { color: #0b5f58; }
+  .sub { color: #6b7086; font-size: 10pt; }
+  ol.steps { font-size: 12.5pt; line-height: 1.55; padding-left: 7mm; margin: 2mm 0; }
+  ol.steps li { margin-bottom: 1.5mm; }
+  .box { border: 2px solid #f5d78a; background: #fff7d6; border-radius: 3mm; padding: 3mm 4mm; font-size: 11.5pt; margin-top: 3mm; }
+  .box b { color: #6b4d00; }
+  .two { display: flex; gap: 6mm; }
+  .two > div { flex: 1; }
+  .small { font-size: 10pt; color: #444; }
+  .blank { display: inline-block; min-width: 60mm; border-bottom: 2px solid #333; }
+  table.k { border-collapse: collapse; font-size: 10.5pt; width: 100%; margin-top: 2mm; }
+  table.k td { border: 1px solid #ccc; padding: 1.5mm 2.5mm; vertical-align: top; }
+  table.k td:first-child { background: #f3f4f8; font-weight: 700; width: 34mm; white-space: nowrap; }
+  .foot { position: absolute; bottom: 0; font-size: 9pt; color: #888; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <h1>📄 プリントがほしい ／ ✋ 質問したい</h1>
+  <div class="sub">スマホ・タブレットから送ると、先生が順番に対応します</div>
+  <div class="top" style="margin-top:4mm">
+    <img src="生徒用QR.png" alt="生徒用QR">
+    <div>
+      <div class="sub">QRが読めないときはこのURLを入力</div>
+      <div class="url">eimeimizutani-support.vercel.app</div>
+      <div class="small" style="margin-top:3mm">ホーム画面に追加すると次からワンタップ<br>iPhone：共有ボタン（□↑）→「ホーム画面に追加」<br>Android：メニュー（⋮）→「ホーム画面に追加」</div>
+    </div>
+  </div>
+
+  <h2>使い方</h2>
+  <ol class="steps">
+    <li>QRを読む → 初回だけ「自分の端末」か「みんなで使う端末」を選ぶ</li>
+    <li>「プリントがほしい」か「質問したい」を押す</li>
+    <li>学年 → 自分の名前 → 教室 → 教科 を選ぶ（席番号はいりません）</li>
+    <li><b>プリント</b>：目的を選ぶ → 確認に答える → 単元名・難易度・量 → 送信<br>
+        <b>質問</b>：「シンキングした？」→ 単元名・ページ → 「早めに来てほしい」か「あとででOK」→ 送信</li>
+    <li>受付番号が出たら、<b>席で待つ</b>。「先生が向かっています」と出たらもうすぐです</li>
+  </ol>
+
+  <div class="two">
+    <div class="box"><b>プリントを頼む前に</b><br>
+      ✅ ワークはやった？　✅ テスト形式はやった？　✅ 範囲表は確認した？<br>
+      <span class="small">まだなら、先にそっちをやろう。「苦手だからポイント確認から」は確認なしでOK。</span></div>
+    <div class="box"><b>質問する前に</b><br>
+      ✅ シンキングした？（自分で5分考えて、ノートに途中まで書いた？）<br>
+      <span class="small">それでも分からなければ質問OK！</span></div>
+  </div>
+
+  <div class="box" style="background:#eef; border-color:#c7d2fe"><b>取り消したいとき</b>：自分の依頼の「取り消す」を2回押す（先生が対応を始める前だけ）。<br>
+    <b>みんなで使う端末</b>：送信後に出た受付番号をおぼえておくと、あとで「受付番号で確認」できます。</div>
+  <div class="foot">同じ端末から15秒以内の連続送信はできません。他の人の依頼は表示されません。</div>
+</div>
+
+<div class="page teacher">
+  <h1>講師画面の使い方</h1>
+  <div class="sub">iPhone・PC どちらでも。5秒ごとに自動更新されます</div>
+  <div class="top" style="margin-top:4mm">
+    <img src="講師用QR.png" alt="講師用QR">
+    <div>
+      <div class="sub">講師画面の URL（どちらでも同じ画面）</div>
+      <div class="url">eimeimizutani-support.vercel.app/teacher</div>
+      <div class="url" style="font-size:12pt">eimeimizutani-support.vercel.app/sensei</div>
+      <div style="margin-top:4mm; font-size:13pt">合言葉：<span class="blank">&nbsp;</span></div>
+      <div class="small">（生徒に見えないところに書いてください）</div>
+    </div>
+  </div>
+
+  <h2>最初にやること（1回だけ）</h2>
+  <ol class="steps">
+    <li>QRを読んで開く → 合言葉と自分の名前を入れて「入る」</li>
+    <li>ホーム画面に追加（iPhone：共有ボタン → ホーム画面に追加）。以後はアイコンから開く</li>
+    <li>右上の 🔔 が鳴る状態か確認（マナーモードだと鳴りません）。画面を開いている間はスリープしません</li>
+  </ol>
+
+  <h2>授業中の流れ</h2>
+  <ol class="steps">
+    <li>上の3つの数字：<b>待ち件数</b>／<b>早めに来てほしい</b>／<b>最長の待ち時間</b>。「早めに」をタップするとそれだけに絞れます</li>
+    <li>カードの「<b>対応する</b>」を押して席へ（生徒の画面に「○○先生が向かっています」と出ます）</li>
+    <li>終わったら「<b>完了にする</b>」→ 定型ボタン（理解できた／要フォロー／類題を渡した…）＋一言 → 完了</li>
+    <li>名前が「名簿外」の依頼は「名簿に紐づけ」で本人に結びつけると、記録に残ります</li>
+  </ol>
+
+  <h2>カードの見方</h2>
+  <table class="k">
+    <tr><td>赤枠・点滅</td><td>「早めに来てほしい」の質問。5分を超えると点滅し、1分ごとに音が鳴ります</td></tr>
+    <tr><td>2行目</td><td>種類・教科・<b>目的</b>・単元・ページ・難易度・量・補足</td></tr>
+    <tr><td>「テスト形式未」など赤い印</td><td>プリントを頼む前の確認が「まだ」だった項目。理由も表示されるので、先にワーク等をやらせるかの判断材料に</td></tr>
+    <tr><td>右上「更新 12:34」</td><td>最終更新時刻。赤い「通信できません」が出たら電波を確認</td></tr>
+  </table>
+
+  <h2>記録・保護者報告</h2>
+  <div class="small">「記録」タブ → 生徒と期間（今月／先月ボタン）→ 表示。質問回数・教科別・プリント回数・要フォロー件数が出ます。「保護者報告のもとを作る」→ コピーして LINE 等に貼り付けて手直し。CSV も出せます。</div>
+  <div class="foot">日付が変わると完了分は一覧から消え「記録」に残ります。前日の「待ち」が残っていたら完了か取消にしてください。</div>
+</div>
+
+</body>
+</html>

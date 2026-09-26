@@ -53,6 +53,14 @@ create table if not exists public.requests (
   linked_at    timestamptz
 );
 
+-- プリントの目的・量・難易度・単元・ページ・事前チェック（あとから追加した列。再実行しても安全）
+alter table public.requests add column if not exists purpose    text;
+alter table public.requests add column if not exists amount     text;
+alter table public.requests add column if not exists difficulty text;
+alter table public.requests add column if not exists unit_name  text not null default '';
+alter table public.requests add column if not exists page_range text not null default '';
+alter table public.requests add column if not exists checks     jsonb not null default '{}'::jsonb;
+
 create index if not exists requests_day_status_idx  on public.requests (day, status);
 create index if not exists requests_device_idx      on public.requests (device_id, created_at);
 create index if not exists requests_student_idx     on public.requests (student_id, day);
@@ -79,6 +87,7 @@ language plpgsql security definer set search_path = public as $$
 begin
   if p_pass is null
      or p_pass <> (select value from app_settings where key = 'teacher_pass') then
+    perform pg_sleep(1);   -- 総当たり対策: 失敗時は1秒待たせる
     raise exception 'BAD_PASS';
   end if;
 end $$;
@@ -97,8 +106,14 @@ language sql stable as $$
     'subject', r.subject,
     'content', r.content,
     'copies', r.copies,
+    'purpose', r.purpose,
+    'amount', r.amount,
+    'difficulty', r.difficulty,
+    'unit_name', r.unit_name,
+    'page_range', r.page_range,
     'urgency', r.urgency,
     'status', r.status,
+    'teacher', case when r.status = 'in_progress' then r.teacher else null end,
     'created_at', r.created_at,
     'started_at', r.started_at,
     'done_at', r.done_at,
@@ -118,7 +133,8 @@ language sql security definer set search_path = public stable as $$
   from students where active order by grade, student_no, name
 $$;
 
--- 依頼を送る
+-- 依頼を送る（古い版の関数が残っていれば消す）
+drop function if exists public.create_request(text,bigint,text,text,text,text,text,text,text,int,text);
 create or replace function public.create_request(
   p_device_id    text,
   p_student_id   bigint,
@@ -130,7 +146,13 @@ create or replace function public.create_request(
   p_subject      text,
   p_content      text,
   p_copies       int,
-  p_urgency      text
+  p_urgency      text,
+  p_purpose      text default null,
+  p_amount       text default null,
+  p_difficulty   text default null,
+  p_unit_name    text default '',
+  p_page_range   text default '',
+  p_checks       jsonb default '{}'::jsonb
 ) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
@@ -170,6 +192,11 @@ begin
   if p_subject is null or length(p_subject) = 0 then raise exception 'NO_SUBJECT'; end if;
   if length(coalesce(p_content,'')) > 200 then raise exception 'CONTENT_TOO_LONG'; end if;
   if length(v_name) > 40 or length(coalesce(p_seat,'')) > 10 then raise exception 'TOO_LONG'; end if;
+  if length(coalesce(p_unit_name,'')) > 60 or length(coalesce(p_page_range,'')) > 40 then raise exception 'TOO_LONG'; end if;
+  if p_kind = 'print' and (p_purpose is null or p_purpose not in ('point','practice','weak','test')) then raise exception 'NO_PURPOSE'; end if;
+  if p_amount is not null and p_amount not in ('S','M','L') then raise exception 'BAD_AMOUNT'; end if;
+  if p_difficulty is not null and p_difficulty not in ('basic','standard','advanced') then raise exception 'BAD_DIFFICULTY'; end if;
+  if p_checks is not null and jsonb_typeof(p_checks) <> 'object' then raise exception 'BAD_CHECKS'; end if;
 
   -- 受付番号（その日の通し番号）: 同時送信でも重複しないようロック
   perform pg_advisory_xact_lock(424242);
@@ -177,13 +204,19 @@ begin
   from requests where day = jst_today();
 
   insert into requests (day, receipt_no, student_id, student_name, grade,
-                        classroom, seat, kind, subject, content, copies, urgency, device_id)
+                        classroom, seat, kind, subject, content, copies, urgency, device_id,
+                        purpose, amount, difficulty, unit_name, page_range, checks)
   values (jst_today(), v_no, p_student_id, trim(v_name), v_grade,
           p_classroom, coalesce(trim(p_seat),''), p_kind, p_subject,
           coalesce(trim(p_content),''),
           case when p_kind = 'print' then p_copies else null end,
           case when p_kind = 'question' then coalesce(p_urgency,'later') else null end,
-          p_device_id)
+          p_device_id,
+          case when p_kind = 'print' then p_purpose else null end,
+          case when p_kind = 'print' then p_amount else null end,
+          case when p_kind = 'print' then p_difficulty else null end,
+          coalesce(trim(p_unit_name),''), coalesce(trim(p_page_range),''),
+          coalesce(p_checks, '{}'::jsonb))
   returning * into v_row;
 
   select count(*) into v_pos from requests where status = 'waiting';
@@ -375,7 +408,7 @@ end $$;
 
 grant usage on schema public to anon, authenticated;
 grant execute on function
-  public.list_students(), public.create_request(text,bigint,text,text,text,text,text,text,text,int,text),
+  public.list_students(), public.create_request(text,bigint,text,text,text,text,text,text,text,int,text,text,text,text,text,text,jsonb),
   public.my_requests(text), public.request_by_receipt(int), public.cancel_request(bigint,text),
   public.teacher_login(text), public.teacher_list(text),
   public.teacher_update(text,bigint,text,text,text,text[]),

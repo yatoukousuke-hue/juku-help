@@ -1,2 +1,5 @@
 dev/node_modules/
 .claude/
+dev/roster.xlsx
+dev/roster_import.json
+dev/schema_json.txt

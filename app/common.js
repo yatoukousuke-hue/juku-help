@@ -18,7 +18,19 @@
   const KIND_LABEL = { print: 'プリント', question: '質問' };
   const KIND_ICON = { print: '📄', question: '✋' };
   const STATUS_LABEL = { waiting: '待ち', in_progress: '対応中', done: '完了', cancelled: '取消' };
-  const URGENCY_LABEL = { now: 'すぐ来てほしい', later: 'あとででOK' };
+  const URGENCY_LABEL = Object.assign({ now: '早めに来てほしい', later: 'あとででOK' }, C.URGENCY_LABELS || {});
+  const toMap = (list) => (list || []).reduce((m, x) => { m[x.key] = x.label; return m; }, {});
+  const PURPOSE_LABEL = toMap(C.PRINT_PURPOSES);
+  const AMOUNT_LABEL = toMap(C.PRINT_AMOUNTS);
+  const DIFF_LABEL = toMap(C.PRINT_DIFFICULTIES);
+  const CHECK_LABEL = toMap(C.PRINT_CHECKS);
+  // 事前チェックで「まだ」だった項目の一覧（講師画面の注意表示用）
+  const unmetChecks = (r) => {
+    if (r.kind !== 'print' || !r.checks || typeof r.checks !== 'object') return [];
+    const p = (C.PRINT_PURPOSES || []).find((x) => x.key === r.purpose);
+    if (!p || !p.needsCheck) return [];
+    return (C.PRINT_CHECKS || []).filter((c) => r.checks[c.key] === false).map((c) => c.label.replace(/[はを]?(やった|確認した)？$/, ''));
+  };
 
   const ERROR_TEXT = {
     TOO_FAST: '送信の間隔が短すぎます。15秒ほど待ってからもう一度送ってください。',
@@ -31,6 +43,7 @@
     CONTENT_TOO_LONG: '内容が長すぎます（200文字まで）。',
     TOO_LONG: '入力が長すぎます。',
     NO_STUDENT: '名簿にその生徒がいません。',
+    NO_PURPOSE: 'プリントの目的を選んでください。',
     NOT_FOUND: '対象の依頼が見つかりません（すでに変更されたかもしれません）。',
     PASS_TOO_SHORT: '合言葉は4文字以上にしてください。',
     BAD_DEVICE: '端末の識別に失敗しました。ページを再読み込みしてください。',
@@ -87,6 +100,8 @@
         p_device_id: p.device_id, p_student_id: p.student_id ?? null, p_student_name: p.student_name ?? null,
         p_grade: p.grade ?? null, p_classroom: p.classroom, p_seat: p.seat ?? '', p_kind: p.kind,
         p_subject: p.subject, p_content: p.content ?? '', p_copies: p.copies ?? null, p_urgency: p.urgency ?? null,
+        p_purpose: p.purpose ?? null, p_amount: p.amount ?? null, p_difficulty: p.difficulty ?? null,
+        p_unit_name: p.unit_name ?? '', p_page_range: p.page_range ?? '', p_checks: p.checks ?? {},
       }),
       myRequests: (dev) => call('my_requests', { p_device_id: dev }),
       requestByReceipt: (no) => call('request_by_receipt', { p_receipt_no: no }),
@@ -110,9 +125,9 @@
     const save = (db) => store.set(KEY, db);
     function seed() {
       const db = { pass: 'sensei', seq: 0, sseq: 0, students: [], requests: [] };
-      [['1001', '佐藤 花子', '中2', '第一中'], ['1002', '鈴木 太郎', '中3', '第二中'], ['1003', '高橋 美咲', '中1', '第一中'],
-       ['1004', '田中 健', '中2', '第三中'], ['1005', '伊藤 さくら', '中3', '第一中'], ['1006', '渡辺 大輝', '中1', '第二中']]
-        .forEach(([no, name, grade, school]) => db.students.push({ id: ++db.sseq, student_no: no, name, grade, school, active: true }));
+      [['佐藤 花子', '中2', '第一中'], ['鈴木 太郎', '中3', '第二中'], ['高橋 美咲', '中1', '第一中'],
+       ['田中 健', '中2', '第三中'], ['伊藤 さくら', '中3', '第一中'], ['渡辺 大輝', '中1', '第二中']]
+        .forEach(([name, grade, school]) => db.students.push({ id: ++db.sseq, student_no: `${grade}_${name.replace(/[\s　]/g, '')}`, name, grade, school, active: true }));
       save(db); return db;
     }
     const nowIso = () => new Date().toISOString();
@@ -121,6 +136,8 @@
     const pub = (db, r) => ({
       id: r.id, receipt_no: r.receipt_no, day: r.day, student_name: r.student_name, classroom: r.classroom, seat: r.seat,
       kind: r.kind, subject: r.subject, content: r.content, copies: r.copies, urgency: r.urgency, status: r.status,
+      purpose: r.purpose, amount: r.amount, difficulty: r.difficulty, unit_name: r.unit_name, page_range: r.page_range,
+      teacher: r.status === 'in_progress' ? r.teacher : null,
       created_at: r.created_at, started_at: r.started_at, done_at: r.done_at,
       ahead: r.status === 'waiting' ? db.requests.filter((w) => w.status === 'waiting' && w.created_at < r.created_at).length : 0,
     });
@@ -141,12 +158,16 @@
         if (!['print', 'question'].includes(p.kind)) throw new Error('BAD_KIND');
         if (!p.subject) throw new Error('NO_SUBJECT');
         if ((p.content || '').length > 200) throw new Error('CONTENT_TOO_LONG');
+        if (p.kind === 'print' && !['point', 'practice', 'weak', 'test'].includes(p.purpose)) throw new Error('NO_PURPOSE');
         const day = jstToday();
         const no = db.requests.filter((r) => r.day === day).reduce((m, r) => Math.max(m, r.receipt_no), 0) + 1;
         const r = {
           id: ++db.seq, created_at: nowIso(), day, receipt_no: no, student_id: sid, student_name: name, grade,
           classroom: p.classroom, seat: (p.seat || '').trim(), kind: p.kind, subject: p.subject, content: (p.content || '').trim(),
           copies: p.kind === 'print' ? (p.copies ?? null) : null, urgency: p.kind === 'question' ? (p.urgency || 'later') : null,
+          purpose: p.kind === 'print' ? p.purpose : null, amount: p.kind === 'print' ? (p.amount ?? null) : null,
+          difficulty: p.kind === 'print' ? (p.difficulty ?? null) : null,
+          unit_name: (p.unit_name || '').trim(), page_range: (p.page_range || '').trim(), checks: p.checks || {},
           status: 'waiting', teacher: null, started_at: null, done_at: null, memo: null, memo_tags: [], device_id: p.device_id, linked_at: null,
         };
         db.requests.push(r); save(db);
@@ -203,5 +224,5 @@
     window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => {}); });
   }
 
-  window.JH = { $, $$, esc, fmtTime, fmtDate, fmtDateTime, ymd, todayYmd, minutesSince, elapsedText, KIND_LABEL, KIND_ICON, STATUS_LABEL, URGENCY_LABEL, errorText, toast, deviceId, store, api, demoBanner };
+  window.JH = { $, $$, esc, fmtTime, fmtDate, fmtDateTime, ymd, todayYmd, minutesSince, elapsedText, KIND_LABEL, KIND_ICON, STATUS_LABEL, URGENCY_LABEL, PURPOSE_LABEL, AMOUNT_LABEL, DIFF_LABEL, CHECK_LABEL, unmetChecks, errorText, toast, deviceId, store, api, demoBanner };
 })();

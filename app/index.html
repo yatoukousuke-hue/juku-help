@@ -22,14 +22,14 @@
 <script>
 (function () {
   'use strict';
-  const { $, $$, esc, fmtTime, elapsedText, KIND_LABEL, KIND_ICON, STATUS_LABEL, URGENCY_LABEL, errorText, toast, deviceId, store, api } = window.JH;
+  const { $, $$, esc, fmtTime, elapsedText, KIND_LABEL, KIND_ICON, STATUS_LABEL, URGENCY_LABEL, PURPOSE_LABEL, AMOUNT_LABEL, DIFF_LABEL, errorText, toast, deviceId, store, api } = window.JH;
   const C = window.APP_CONFIG;
   const app = $('#app');
   const DEV = deviceId();
 
   // ---- 状態 ----
   let mode = store.get('jh_mode', null);            // 'personal' | 'shared'
-  let profile = store.get('jh_profile', null);      // {student_id, student_name, grade, classroom, seat}
+  let profile = store.get('jh_profile', null);      // {student_id, student_name, grade, classroom}
   let roster = store.get('jh_roster', []);
   let view = 'home';
   let form = null;                                   // 入力中の依頼
@@ -65,7 +65,7 @@
       <div class="card mode-choice">
         <h2>この端末は？</h2>
         <p class="muted small">あとで右上の ⚙ から変更できます。</p>
-        <button class="btn big block" id="modePersonal">📱 自分の端末<span class="d">名前・教室・席を記憶して、次から自動で入力します</span></button>
+        <button class="btn big block" id="modePersonal">📱 自分の端末<span class="d">名前・教室を記憶して、次から自動で入力します</span></button>
         <button class="btn big block ghost" id="modeShared">🏫 みんなで使う端末<span class="d">送信するたびに入力を消します（前の人の情報が残りません）</span></button>
       </div>`;
     $('#modePersonal').onclick = () => { setMode('personal'); };
@@ -81,7 +81,7 @@
   function renderHome() {
     const isPersonal = mode === 'personal';
     app.innerHTML = `${header()}
-      ${isPersonal && profile ? `<div class="card small"><span class="muted">あなた：</span><b>${esc(profile.student_name)}</b>${profile.grade ? `（${esc(profile.grade)}）` : ''}　${esc(profile.classroom || '')} ${profile.seat ? esc(profile.seat) + '番' : ''}
+      ${isPersonal && profile ? `<div class="card small"><span class="muted">あなた：</span><b>${esc(profile.student_name)}</b>${profile.grade ? `（${esc(profile.grade)}）` : ''}　${esc(profile.classroom || '')}
         <button class="btn-link small" id="btnEditProfile">変更</button></div>` : ''}
       <button class="btn big block" id="btnPrint" style="margin-bottom:12px">📄 プリントがほしい</button>
       <button class="btn big block" id="btnQuestion" style="margin-bottom:20px">✋ 質問したい</button>
@@ -103,13 +103,24 @@
     }
   }
 
+  function reqDetail(r) {
+    const parts = [];
+    if (r.kind === 'print' && r.purpose) parts.push(PURPOSE_LABEL[r.purpose] || r.purpose);
+    if (r.unit_name) parts.push(r.unit_name);
+    if (r.page_range) parts.push(r.page_range);
+    if (r.kind === 'print') { const x = [DIFF_LABEL[r.difficulty], AMOUNT_LABEL[r.amount]].filter(Boolean).join('・'); if (x) parts.push(x); }
+    if (r.content) parts.push(r.content);
+    return parts.map(esc).join('　');
+  }
   function reqCard(r, allowCancel) {
     const st = r.status;
-    const ahead = st === 'waiting' ? `あと ${r.ahead} 人待ち` : st === 'in_progress' ? '講師が対応中です' : st === 'done' ? `完了 ${fmtTime(r.done_at)}` : '取り消しました';
+    const ahead = st === 'waiting' ? (r.ahead === 0 ? '次はあなたの番です' : `あと ${r.ahead} 人待ち`) : st === 'in_progress' ? '対応中' : st === 'done' ? `完了 ${fmtTime(r.done_at)}` : '取り消しました';
+    const coming = st === 'in_progress' ? `<div class="coming">🏃 ${r.teacher ? esc(r.teacher) + '先生' : '先生'}が向かっています。席で待っていてください</div>` : '';
     return `<div class="myreq" data-id="${r.id}">
+      ${coming}
       <div class="line1"><span>#${r.receipt_no}</span><span>${KIND_ICON[r.kind]} ${esc(r.subject)} ${KIND_LABEL[r.kind]}</span>
-        ${r.urgency === 'now' ? '<span class="badge now">すぐ</span>' : ''}<span class="spacer"></span><span class="badge ${st}">${STATUS_LABEL[st]}</span></div>
-      <div class="line2">${esc(r.content || '')}${r.copies ? ` ×${r.copies}枚` : ''}</div>
+        ${r.urgency === 'now' ? '<span class="badge now">早めに</span>' : ''}<span class="spacer"></span><span class="badge ${st}">${STATUS_LABEL[st]}</span></div>
+      <div class="line2">${reqDetail(r)}</div>
       <div class="line2">${ahead}　・　送信 ${fmtTime(r.created_at)}（${elapsedText(r.created_at)}前）</div>
       ${allowCancel && st === 'waiting' ? `<div><button class="btn danger sm" data-cancel="${r.id}">取り消す</button></div>` : ''}
     </div>`;
@@ -123,9 +134,10 @@
       bindCancel(box);
     } catch (e) { const box = $('#myList'); if (box) box.innerHTML = `<div class="small" style="color:var(--danger)">${esc(errorText(e))}</div>`; }
   }
+  // 取り消しは2段階（ボタン → 「本当に取り消す」）。confirm ダイアログは使わない
   function bindCancel(root) {
     $$('[data-cancel]', root).forEach((b) => b.onclick = async () => {
-      if (!confirm('この依頼を取り消しますか？')) return;
+      if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = '本当に取り消す（もう一度押す）'; setTimeout(() => { if (b.isConnected) { b.dataset.armed = ''; b.textContent = '取り消す'; } }, 4000); return; }
       b.disabled = true;
       try { await api.cancelRequest(Number(b.dataset.cancel), DEV); toast('取り消しました'); if (mode === 'personal') refreshMyList(); else lookupReceipt(); }
       catch (e) { toast(errorText(e), 'error'); b.disabled = false; }
@@ -148,92 +160,186 @@
   function startPolling(fn) { stopPolling(); pollTimer = setInterval(() => { if (document.visibilityState === 'visible') fn(); }, (C.REFRESH_SEC_STUDENT || 10) * 1000); }
   function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 
+  // 共有端末: 入力途中で放置されたら一定時間でホームに戻す（前の生徒の入力が残らないように）
+  let idleTimer = null;
+  function touchIdle() {
+    if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+    if (mode !== 'shared' || view !== 'form') return;
+    idleTimer = setTimeout(() => { if (view === 'form') { form = null; view = 'home'; render(); } }, (C.SHARED_IDLE_SEC || 180) * 1000);
+  }
+  ['click', 'input', 'touchstart', 'keydown'].forEach((ev) => document.addEventListener(ev, () => { if (view === 'form') touchIdle(); }, { passive: true }));
+
   // ---- 入力フォーム ----
   function startForm(kind) {
     const p = (mode === 'personal' && profile) ? profile : {};
     form = {
       kind, student_id: p.student_id ?? null, student_name: p.student_name || '', grade: p.grade || '', other: !!p.other,
-      classroom: p.classroom || (C.CLASSROOMS.length === 1 ? C.CLASSROOMS[0] : ''), seat: p.seat || '',
-      subject: '', content: '', copies: null, urgency: 'later',
-      whoDone: !!(mode === 'personal' && profile && profile.student_name), pickGrade: p.grade || '',
+      classroom: p.classroom || (C.CLASSROOMS.length === 1 ? C.CLASSROOMS[0] : ''), seat: '',
+      subject: '', content: '', urgency: 'later',
+      purpose: '', checks: {}, amount: '', difficulty: '', unit_name: '', page_range: '', reason: '',
+      thinking: null,                                        // 質問: シンキングした？ (true/false/null)
+      whoDone: !!(mode === 'personal' && profile && profile.student_name), pickGrade: p.grade || '', nameQ: '',
     };
     view = 'form'; render();
     window.scrollTo(0, 0);
   }
+
+  // 事前チェックが必要な目的で、「まだ」の項目があるか
+  function unmet(f) {
+    const p = C.PRINT_PURPOSES.find((x) => x.key === f.purpose);
+    if (!p || !p.needsCheck) return [];
+    return C.PRINT_CHECKS.filter((c) => f.checks[c.key] !== true);
+  }
+
   function renderForm() {
     const f = form;
     const isPrint = f.kind === 'print';
     const chips = (list, cur, attr, cls) => list.map((v) => `<button class="chip ${cls || ''} ${cur === v ? 'selected' : ''}" data-${attr}="${esc(v)}">${esc(v)}</button>`).join('');
+    const kchips = (list, cur, attr, cls) => list.map((v) => `<button class="chip ${cls || ''} ${cur === v.key ? 'selected' : ''}" data-${attr}="${esc(v.key)}">${esc(v.label)}</button>`).join('');
     const grade = f.pickGrade;
-    const names = grade ? roster.filter((s) => s.grade === grade) : [];
+    const q = (f.nameQ || '').trim();
+    const names = q ? roster.filter((s) => s.name.replace(/\s/g, '').includes(q.replace(/\s/g, '')) && (!grade || s.grade === grade))
+                    : (grade ? roster.filter((s) => s.grade === grade) : []);
+    const T = C.THINKING_CHECK;
+    let n = 0; const step = (title) => `<div class="step"><span class="num">${++n}</span>${title}</div>`;
+
+    // 質問: 最初に「シンキングした？」
+    const thinkingBlock = !isPrint ? `
+        ${step(T.question)}
+        <div class="chips" id="thinkChips">
+          <button class="chip wide ${f.thinking === true ? 'selected' : ''}" data-think="1">✅ ${esc(T.yes)}</button>
+          <button class="chip wide ${f.thinking === false ? 'selected' : ''}" data-think="0">${esc(T.no)}</button>
+        </div>
+        ${f.thinking === false ? `<div class="nudge">${esc(T.nudge)}<div class="mt"><button class="btn block" id="btnGoThink">考えてくる（ホームへ）</button></div></div>` : ''}` : '';
+    const questionLocked = !isPrint && f.thinking !== true;
+
+    const purposeBlock = isPrint ? `
+        ${step('プリントの目的')}
+        <div class="chips" id="purposeChips">${C.PRINT_PURPOSES.map((p) => `<button class="chip wide ${f.purpose === p.key ? 'selected' : ''}" data-purpose="${esc(p.key)}">${esc(p.label)}</button>`).join('')}</div>` : '';
+
+    const needCheck = isPrint && !!(C.PRINT_PURPOSES.find((x) => x.key === f.purpose) || {}).needsCheck;
+    const um = isPrint ? unmet(f) : [];
+    const checkBlock = needCheck ? `
+        ${step('その前に確認')}
+        <div id="checkRows">${C.PRINT_CHECKS.map((c) => `<div class="checkrow"><span class="q">${esc(c.label)}</span>
+            <button class="chip ${f.checks[c.key] === true ? 'selected' : ''}" data-check="${esc(c.key)}" data-val="1">やった</button>
+            <button class="chip ${f.checks[c.key] === false ? 'selected danger' : ''}" data-check="${esc(c.key)}" data-val="0">まだ</button></div>`).join('')}</div>
+        ${um.length && C.PRINT_CHECKS.every((c) => f.checks[c.key] !== undefined) ? `<div class="nudge">まずは「${esc(um.map((c) => c.label.replace(/[はを]?(やった|確認した)？$/, '')).join('」「'))}」を先にやってみよう。<div class="small mt">それでも今プリントが必要なときは、理由を書いて送ってください（先生が確認します）。</div>
+            <input class="input mt" id="reasonInput" placeholder="理由（例: 明日テストで時間がない）" value="${esc(f.reason)}"></div>` : ''}` : '';
 
     app.innerHTML = `<div class="topbar"><button class="btn ghost sm" id="btnBack">← もどる</button><h1>${KIND_ICON[f.kind]} ${isPrint ? 'プリントがほしい' : '質問したい'}</h1><span></span></div>
       <div class="card">
-        <div class="step"><span class="num">1</span>だれ？</div>
+        ${thinkingBlock}
+        <div id="restOfForm" class="${questionLocked ? 'hidden' : ''}">
+        ${step('だれ？')}
         ${f.whoDone ? `<div class="row"><b>${esc(f.student_name)}</b>${f.grade ? `（${esc(f.grade)}）` : ''}<button class="btn-link small" id="btnChangeWho">変更</button></div>` : `
           <div class="chips" id="gradeChips">${chips(C.GRADES, grade, 'grade')}</div>
-          <div class="row mt"><input class="input" id="noInput" inputmode="numeric" placeholder="生徒番号で探す" style="flex:1"></div>
-          <div class="chips names mt" id="nameChips">${names.length ? names.map((s) => `<button class="chip ${f.student_id === s.id ? 'selected' : ''}" data-sid="${s.id}">${esc(s.name)}</button>`).join('') : '<div class="muted small">学年を選ぶと名前が出ます</div>'}</div>
-          <div class="mt"><button class="chip ${f.other ? 'selected' : ''}" id="btnOther">その他（名前を入力）</button></div>
+          <div class="row mt"><input class="input" id="nameSearch" placeholder="名前で探す" value="${esc(f.nameQ || '')}" style="flex:1"></div>
+          <div class="chips names mt" id="nameChips">${names.length ? names.map((s) => `<button class="chip ${f.student_id === s.id ? 'selected' : ''}" data-sid="${s.id}">${esc(s.name)}${!grade ? `<span class="muted small">（${esc(s.grade)}）</span>` : ''}</button>`).join('') : `<div class="muted small">${q ? '見つかりません' : '学年を選ぶか、名前を入力してください'}</div>`}</div>
+          <div class="mt"><button class="chip ${f.other ? 'selected' : ''}" id="btnOther">名簿にない（名前を入力）</button></div>
           ${f.other ? `<input class="input mt" id="otherName" placeholder="名前を入力" value="${esc(f.student_name)}">` : ''}
         `}
 
-        <div class="step"><span class="num">2</span>どこ？</div>
+        ${step('どこ？')}
         <div class="chips" id="roomChips">${chips(C.CLASSROOMS, f.classroom, 'room')}</div>
-        <div class="row mt"><span>席番号</span><input class="input" id="seatInput" type="${C.SEAT_INPUT === 'number' ? 'number' : 'text'}" inputmode="${C.SEAT_INPUT === 'number' ? 'numeric' : 'text'}" placeholder="例: 12" value="${esc(f.seat)}" style="width:120px"><span class="muted small">${C.SEAT_REQUIRED ? '' : '（分かれば）'}</span></div>
+        ${C.SEAT_ENABLED ? `<div class="row mt"><span>席番号</span><input class="input" id="seatInput" type="${C.SEAT_INPUT === 'number' ? 'number' : 'text'}" inputmode="${C.SEAT_INPUT === 'number' ? 'numeric' : 'text'}" placeholder="例: 12" value="${esc(f.seat)}" style="width:120px"></div>` : ''}
 
-        <div class="step"><span class="num">3</span>教科</div>
+        ${step('教科')}
         <div class="chips" id="subjChips">${chips(C.SUBJECTS, f.subject, 'subj')}</div>
 
-        <div class="step"><span class="num">4</span>${isPrint ? '内容' : '質問の内容'}</div>
-        <textarea class="input" id="contentInput" maxlength="200" placeholder="${isPrint ? '例: 一次関数の復習プリント、さっきの小テストの解き直し' : '（任意）例: テキストp.32の問3'}">${esc(f.content)}</textarea>
-        ${isPrint ? `<div class="row mt"><span>枚数（任意）</span><div class="chips" id="copiesChips">${[1, 2, 3, 5].map((n) => `<button class="chip ${f.copies === n ? 'selected' : ''}" data-copies="${n}">${n}枚</button>`).join('')}</div></div>`
-                  : `<div class="chips mt" id="urgChips"><button class="chip wide danger ${f.urgency === 'now' ? 'selected' : ''}" data-urg="now">🔴 すぐ来てほしい</button><button class="chip wide ${f.urgency === 'later' ? 'selected' : ''}" data-urg="later">あとででOK</button></div>`}
+        ${purposeBlock}
+        ${checkBlock}
+
+        ${step(isPrint ? '単元・範囲' : '質問の内容')}
+        <input class="input" id="unitInput" maxlength="60" placeholder="${isPrint ? '単元名（例: 一次関数、関係代名詞）' : '単元名（例: 一次関数）'}" value="${esc(f.unit_name)}">
+        <input class="input mt" id="pageInput" maxlength="40" placeholder="${isPrint ? '範囲のページ（例: ワーク p.32〜35）' : 'ページ・問題番号（例: テキスト p.32 問3）'}" value="${esc(f.page_range)}">
+        ${isPrint ? `
+        <label class="lbl">難易度</label>
+        <div class="chips" id="diffChips">${kchips(C.PRINT_DIFFICULTIES, f.difficulty, 'diff')}</div>
+        <label class="lbl">量</label>
+        <div class="chips" id="amountChips">${kchips(C.PRINT_AMOUNTS, f.amount, 'amount')}</div>
+        <label class="lbl">補足（任意）</label>
+        <textarea class="input" id="contentInput" maxlength="200" placeholder="例: さっきの小テストの解き直しがしたい" style="min-height:64px">${esc(f.content)}</textarea>`
+        : `
+        <label class="lbl">一言（任意）</label>
+        <textarea class="input" id="contentInput" maxlength="200" placeholder="例: (2)の途中式がわからない" style="min-height:64px">${esc(f.content)}</textarea>
+        ${step('急ぎ度')}
+        <div class="chips" id="urgChips"><button class="chip wide danger ${f.urgency === 'now' ? 'selected' : ''}" data-urg="now">🔴 ${esc(URGENCY_LABEL.now)}</button><button class="chip wide ${f.urgency === 'later' ? 'selected' : ''}" data-urg="later">${esc(URGENCY_LABEL.later)}</button></div>`}
 
         <button class="btn big block mt" id="btnSubmit" style="margin-top:22px">送信する</button>
+        </div>
       </div>`;
 
     // 入力値の保持
     const keep = () => {
-      f.seat = $('#seatInput').value.trim();
-      f.content = $('#contentInput').value;
+      if ($('#seatInput')) f.seat = $('#seatInput').value.trim();
+      if ($('#contentInput')) f.content = $('#contentInput').value;
+      if ($('#unitInput')) f.unit_name = $('#unitInput').value;
+      if ($('#pageInput')) f.page_range = $('#pageInput').value;
+      if ($('#reasonInput')) f.reason = $('#reasonInput').value;
       if ($('#otherName')) f.student_name = $('#otherName').value;
+      if ($('#nameSearch')) f.nameQ = $('#nameSearch').value;
     };
-    const rerender = () => { keep(); renderForm(); };
+    touchIdle();
 
     $('#btnBack').onclick = () => { view = 'home'; render(); };
+    $$('#thinkChips .chip').forEach((b) => b.onclick = () => { keep(); f.thinking = b.dataset.think === '1'; renderForm(); });
+    if ($('#btnGoThink')) $('#btnGoThink').onclick = () => { form = null; view = 'home'; render(); toast('考えてから、また来てね！'); };
     if ($('#btnChangeWho')) $('#btnChangeWho').onclick = () => { keep(); f.whoDone = false; f.student_id = null; f.student_name = ''; f.other = false; renderForm(); };
     $$('#gradeChips .chip').forEach((b) => b.onclick = () => { keep(); f.pickGrade = b.dataset.grade; f.student_id = null; f.other = false; f.student_name = ''; renderForm(); });
-    $$('#nameChips .chip').forEach((b) => b.onclick = () => { keep(); const s = roster.find((x) => x.id === Number(b.dataset.sid)); f.student_id = s.id; f.student_name = s.name; f.grade = s.grade; f.other = false; f.whoDone = true; renderForm(); });
-    if ($('#btnOther')) $('#btnOther').onclick = () => { keep(); f.other = true; f.student_id = null; f.student_name = ''; f.grade = f.pickGrade; renderForm(); $('#otherName').focus(); };
-    if ($('#noInput')) $('#noInput').addEventListener('input', (e) => {
-      const v = e.target.value.trim(); if (!v) return;
-      const s = roster.find((x) => x.student_no === v);
-      if (s) { keep(); f.student_id = s.id; f.student_name = s.name; f.grade = s.grade; f.other = false; f.whoDone = true; renderForm(); }
+    const bindNames = () => $$('#nameChips .chip').forEach((b) => b.onclick = () => { keep(); const s = roster.find((x) => x.id === Number(b.dataset.sid)); f.student_id = s.id; f.student_name = s.name; f.grade = s.grade; f.other = false; f.whoDone = true; f.nameQ = ''; renderForm(); });
+    bindNames();
+    if ($('#nameSearch')) $('#nameSearch').addEventListener('input', (e) => {
+      // 入力のたびに名前一覧だけ差し替える（全体を描き直すとキーボードが閉じるため）
+      f.nameQ = e.target.value;
+      const qq = f.nameQ.replace(/\s/g, '');
+      const list = qq ? roster.filter((s) => s.name.replace(/\s/g, '').includes(qq) && (!f.pickGrade || s.grade === f.pickGrade)) : (f.pickGrade ? roster.filter((s) => s.grade === f.pickGrade) : []);
+      $('#nameChips').innerHTML = list.length ? list.map((s) => `<button class="chip" data-sid="${s.id}">${esc(s.name)}${!f.pickGrade ? `<span class="muted small">（${esc(s.grade)}）</span>` : ''}</button>`).join('') : `<div class="muted small">${qq ? '見つかりません' : '学年を選ぶか、名前を入力してください'}</div>`;
+      bindNames();
     });
+    if ($('#btnOther')) $('#btnOther').onclick = () => { keep(); f.other = true; f.student_id = null; f.student_name = ''; f.grade = f.pickGrade; renderForm(); $('#otherName').focus(); };
     $$('#roomChips .chip').forEach((b) => b.onclick = () => { keep(); f.classroom = b.dataset.room; renderForm(); });
     $$('#subjChips .chip').forEach((b) => b.onclick = () => { keep(); f.subject = b.dataset.subj; renderForm(); });
-    $$('#copiesChips .chip').forEach((b) => b.onclick = () => { keep(); const n = Number(b.dataset.copies); f.copies = f.copies === n ? null : n; renderForm(); });
+    $$('#purposeChips .chip').forEach((b) => b.onclick = () => { keep(); f.purpose = b.dataset.purpose; renderForm(); });
+    $$('[data-check]').forEach((b) => b.onclick = () => { keep(); f.checks[b.dataset.check] = b.dataset.val === '1'; renderForm(); });
+    $$('#diffChips .chip').forEach((b) => b.onclick = () => { keep(); f.difficulty = b.dataset.diff; renderForm(); });
+    $$('#amountChips .chip').forEach((b) => b.onclick = () => { keep(); f.amount = b.dataset.amount; renderForm(); });
     $$('#urgChips .chip').forEach((b) => b.onclick = () => { keep(); f.urgency = b.dataset.urg; renderForm(); });
     $('#btnSubmit').onclick = () => { keep(); submit(); };
   }
 
   async function submit() {
     const f = form;
+    const isPrint = f.kind === 'print';
     if (f.other) f.student_name = (f.student_name || '').trim();
+    if (!isPrint && f.thinking !== true) return toast('まず「シンキングした？」に答えてください', 'error');
     if (!f.student_id && !f.student_name) return toast('名前を選んでください', 'error');
     if (!f.classroom) return toast('教室を選んでください', 'error');
-    if (C.SEAT_REQUIRED && !f.seat) return toast('席番号を入力してください', 'error');
     if (!f.subject) return toast('教科を選んでください', 'error');
+    if (isPrint) {
+      if (!f.purpose) return toast('プリントの目的を選んでください', 'error');
+      const needCheck = !!(C.PRINT_PURPOSES.find((x) => x.key === f.purpose) || {}).needsCheck;
+      if (needCheck && C.PRINT_CHECKS.some((c) => f.checks[c.key] === undefined)) return toast('「その前に確認」の3つに答えてください', 'error');
+      if (needCheck && unmet(f).length && !f.reason.trim()) return toast('先にやるか、今必要な理由を書いてください', 'error');
+      if (!f.unit_name.trim()) return toast('単元名を入力してください', 'error');
+      if (!f.difficulty) return toast('難易度を選んでください', 'error');
+      if (!f.amount) return toast('量を選んでください', 'error');
+    } else {
+      if (!f.unit_name.trim() && !f.page_range.trim() && !f.content.trim()) return toast('単元名かページを入力してください', 'error');
+    }
     const btn = $('#btnSubmit'); btn.disabled = true; btn.textContent = '送信中…';
+    const needCheck = isPrint && !!(C.PRINT_PURPOSES.find((x) => x.key === f.purpose) || {}).needsCheck;
+    const checks = needCheck ? Object.assign({}, f.checks, f.reason.trim() ? { reason: f.reason.trim() } : {}) : {};
     try {
       const r = await api.createRequest({
         device_id: DEV, student_id: f.student_id, student_name: f.student_id ? null : f.student_name, grade: f.grade,
-        classroom: f.classroom, seat: f.seat, kind: f.kind, subject: f.subject, content: f.content, copies: f.copies, urgency: f.urgency,
+        classroom: f.classroom, seat: f.seat, kind: f.kind, subject: f.subject, content: f.content.trim(), copies: null, urgency: f.urgency,
+        purpose: isPrint ? f.purpose : null, amount: isPrint ? f.amount : null, difficulty: isPrint ? f.difficulty : null,
+        unit_name: f.unit_name.trim(), page_range: f.page_range.trim(), checks: isPrint ? checks : { thinking: true },
       });
       lastReceipt = r.receipt_no;
       if (mode === 'personal') {
-        profile = { student_id: f.student_id, student_name: r.student_name, grade: f.grade, classroom: f.classroom, seat: f.seat, other: !f.student_id };
+        profile = { student_id: f.student_id, student_name: r.student_name, grade: f.grade, classroom: f.classroom, other: !f.student_id };
         store.set('jh_profile', profile);
       }
       form = { result: r }; view = 'receipt'; render();
@@ -247,7 +353,8 @@
         <div class="muted mt">受付番号</div>
         <div class="big-no">${r.receipt_no}</div>
         <div class="pos">いま <b>${r.position}</b> 番目です</div>
-        <div class="muted small mt">${esc(r.student_name)}さん・${esc(r.classroom)}${r.seat ? ' ' + esc(r.seat) + '番' : ''}・${esc(r.subject)} ${KIND_LABEL[r.kind]}</div>
+        <div class="muted small mt">${esc(r.student_name)}さん・${esc(r.classroom)}・${esc(r.subject)} ${KIND_LABEL[r.kind]}</div>
+        <div class="muted small">${reqDetail(r)}</div>
         ${mode === 'shared' ? '<div class="small mt" style="color:var(--warn);font-weight:700">状態を確認するときは、この受付番号をおぼえておいてください</div>' : ''}
         <button class="btn big block mt" id="btnClose" style="margin-top:24px">${mode === 'shared' ? '終わる（次の人へ）' : 'ホームにもどる'}</button>
       </div>`;
@@ -264,7 +371,7 @@
       <div class="muted small">いまのモード：${mode === 'personal' ? '📱 自分の端末' : '🏫 みんなで使う端末'}</div>
       <button class="btn block mt ${mode === 'personal' ? 'soft' : ''}" id="sPersonal">📱 自分の端末にする</button>
       <button class="btn block mt ${mode === 'shared' ? 'soft' : ''}" id="sShared">🏫 みんなで使う端末にする</button>
-      ${mode === 'personal' ? '<button class="btn block ghost mt" id="sClear">記憶した名前・教室・席を消す</button>' : ''}
+      ${mode === 'personal' ? '<button class="btn block ghost mt" id="sClear">記憶した名前・教室を消す</button>' : ''}
       <button class="btn block ghost mt" id="sReload">名簿を読み直す</button>
       <div class="small muted mt">ホーム画面に追加すると、アプリのように開けます（iPhone: 共有ボタン → 「ホーム画面に追加」／Android: メニュー → 「ホーム画面に追加」）</div>
       <button class="btn block ghost mt" id="sClose">閉じる</button>

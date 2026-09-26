@@ -72,14 +72,26 @@ await expectError('rate limit 15s', () => rpc('create_request', {
 
 // 別端末から「その他（手入力）」
 const DEV2 = 'device-bbbbbbbb';
+await expectError('print without purpose', () => rpc('create_request', {
+  p_device_id: 'device-gggggggg', p_student_id: null, p_student_name: '山本 一郎', p_grade: '中1',
+  p_classroom: 'B教室', p_seat: '', p_kind: 'print', p_subject: '英語', p_content: '', p_copies: null, p_urgency: null,
+}), 'NO_PURPOSE');
 const r2 = (await rpc('create_request', {
   p_device_id: DEV2, p_student_id: null, p_student_name: '山本 一郎', p_grade: '中1',
   p_classroom: 'B教室', p_seat: '3', p_kind: 'print', p_subject: '英語',
   p_content: '関係代名詞の復習', p_copies: 2, p_urgency: null,
+  p_purpose: 'practice', p_amount: 'M', p_difficulty: 'standard', p_unit_name: '関係代名詞', p_page_range: 'p.40-43',
+  p_checks: JSON.stringify({ work: true, test: false, range: true }),
 }))[0];
 ok('receipt_no 2', r2.receipt_no === 2);
 ok('position 2', r2.position === 2);
 ok('copies kept, urgency null for print', r2.copies === 2 && r2.urgency === null);
+ok('print fields stored', r2.purpose === 'practice' && r2.amount === 'M' && r2.difficulty === 'standard' && r2.unit_name === '関係代名詞' && r2.page_range === 'p.40-43', JSON.stringify(r2));
+await expectError('bad amount', () => rpc('create_request', {
+  p_device_id: 'device-ffffffff', p_student_id: null, p_student_name: 'x', p_grade: '',
+  p_classroom: 'A教室', p_seat: '', p_kind: 'print', p_subject: '英語', p_content: '', p_copies: null, p_urgency: null,
+  p_purpose: 'point', p_amount: 'XL', p_difficulty: null, p_unit_name: '', p_page_range: '', p_checks: '{}',
+}), 'BAD_AMOUNT');
 
 await expectError('missing name', () => rpc('create_request', {
   p_device_id: 'device-cccccccc', p_student_id: null, p_student_name: '  ', p_grade: '',
@@ -128,6 +140,7 @@ await expectError('cancel done request fails', () => rpc('cancel_request', { p_i
 const r3 = (await rpc('create_request', {
   p_device_id: 'device-eeeeeeee', p_student_id: hanako.id, p_student_name: null, p_grade: null,
   p_classroom: 'A教室', p_seat: '12', p_kind: 'print', p_subject: '理科', p_content: 'x', p_copies: 1, p_urgency: null,
+  p_purpose: 'point', p_amount: 'S', p_difficulty: 'basic', p_unit_name: '光の性質', p_page_range: '', p_checks: '{}',
 }))[0];
 await expectError('cancel from other device fails', () => rpc('cancel_request', { p_id: r3.id, p_device_id: 'device-zzzzzzzz' }), 'CANNOT_CANCEL');
 const c = (await rpc('cancel_request', { p_id: r3.id, p_device_id: 'device-eeeeeeee' }))[0];

@@ -36,6 +36,31 @@ window.APP_CONFIG = {
   PRINT_AMOUNTS:      [{ key: "S", label: "少なめ" }, { key: "M", label: "ふつう" }, { key: "L", label: "多め" }],
   PRINT_DIFFICULTIES: [{ key: "basic", label: "基礎" }, { key: "standard", label: "標準" }, { key: "advanced", label: "応用" }],
 
+  // --- 範囲の入力欄（教科ごとに言い方を変える。default は英語以外） ---
+  // required: true なら必ず書かせる（プリント・質問とも）
+  RANGE_FIELDS: {
+    "英語":    { label: "教科書のユニット", placeholder: "例: Unit 3（分かれば p.28〜31 も）", required: true },
+    "default": { label: "教科書のページ",   placeholder: "例: p.32〜35（ワークなら「ワーク p.12」）", required: true },
+  },
+
+  // --- 講師側「プリント指示書」の文面テンプレート ---
+  // {} の中は自動で置き換わります: date, grade, name, school, subject, purpose, unit, range,
+  //   difficulty, amount, content, checks, reason, teacher
+  PRINT_SLIP_TEMPLATE:
+"【プリント作成依頼】{date}\n" +
+"{grade} {name}さん（{school}）　{subject}\n" +
+"目的：{purpose}\n" +
+"単元：{unit}\n" +
+"範囲：{range}\n" +
+"難易度：{difficulty}　／　量：{amount}\n" +
+"事前チェック：{checks}{reason}\n" +
+"本人の補足：{content}\n" +
+"\n" +
+"上記の範囲から、{difficulty}レベルの「{purpose}」プリントを{amount}で作ってください。\n" +
+"・教科書の該当範囲（{range}）で扱う内容だけを使う\n" +
+"・問題番号を付け、最後に解答をまとめて付ける\n" +
+"・つまずきやすいポイントを1〜2行で添える",
+
   // --- 質問の急ぎ度の表示 ---
   URGENCY_LABELS: { now: "早めに来てほしい", later: "あとででOK" },
   // 質問の前の確認（「まだ」を選ぶと質問に進めない）

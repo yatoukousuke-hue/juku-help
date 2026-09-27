@@ -24,6 +24,8 @@
   const AMOUNT_LABEL = toMap(C.PRINT_AMOUNTS);
   const DIFF_LABEL = toMap(C.PRINT_DIFFICULTIES);
   const CHECK_LABEL = toMap(C.PRINT_CHECKS);
+  // 教科ごとの範囲欄（ラベル・例・必須）
+  const rangeField = (subject) => { const m = C.RANGE_FIELDS || {}; return m[subject] || m.default || { label: '教科書のページ', placeholder: '例: p.32〜35', required: true }; };
   // 事前チェックで「まだ」だった項目の一覧（講師画面の注意表示用）
   const unmetChecks = (r) => {
     if (r.kind !== 'print' || !r.checks || typeof r.checks !== 'object') return [];
@@ -224,5 +226,5 @@
     window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => {}); });
   }
 
-  window.JH = { $, $$, esc, fmtTime, fmtDate, fmtDateTime, ymd, todayYmd, minutesSince, elapsedText, KIND_LABEL, KIND_ICON, STATUS_LABEL, URGENCY_LABEL, PURPOSE_LABEL, AMOUNT_LABEL, DIFF_LABEL, CHECK_LABEL, unmetChecks, errorText, toast, deviceId, store, api, demoBanner };
+  window.JH = { $, $$, esc, fmtTime, fmtDate, fmtDateTime, ymd, todayYmd, minutesSince, elapsedText, KIND_LABEL, KIND_ICON, STATUS_LABEL, URGENCY_LABEL, PURPOSE_LABEL, AMOUNT_LABEL, DIFF_LABEL, CHECK_LABEL, unmetChecks, rangeField, errorText, toast, deviceId, store, api, demoBanner };
 })();

@@ -65,8 +65,13 @@ rows()[0].querySelectorAll('button')[0].click(); await sleep(30); // ワーク: 
 rows()[1].querySelectorAll('button')[1].click(); await sleep(30); // テスト形式: まだ
 rows()[2].querySelectorAll('button')[0].click(); await sleep(30); // 範囲表: やった
 ok('「まだ」があると理由欄が出る', s.$('#reasonInput') && s.text().includes('テスト形式'));
-s.setVal('#unitInput', '一次関数'); s.setVal('#pageInput', 'ワーク p.32〜35');
+ok('数学は「教科書のページ」ラベル', s.text().includes('教科書のページ（必須）'));
+s.setVal('#unitInput', '一次関数');
 s.click('標準'); s.click('ふつう'); await sleep(50);
+s.setVal('#reasonInput', '明日テスト');
+s.click('送信する'); await sleep(100);
+ok('ページ未入力では送れない', s.$('#toast').textContent.includes('教科書のページを入力'), s.$('#toast').textContent);
+s.setVal('#pageInput', 'ワーク p.32〜35'); s.setVal('#reasonInput', '');
 s.click('送信する'); await sleep(100);
 ok('理由なしでは送れない', s.text().includes('理由を書いて'));
 s.setVal('#reasonInput', '明日テスト');
@@ -98,8 +103,12 @@ s = load('index.html'); await sleep(300);
 s.click('✋ 質問したい'); await sleep(50); s.click('✅ した'); await sleep(50);
 s.click('変更'); await sleep(30); s.click('中1'); await sleep(30); s.click('高橋 美咲', s.$('#nameChips')); await sleep(30);
 s.click('個別部屋'); s.click('英語'); await sleep(30);
-s.setVal('#unitInput', '関係代名詞'); s.setVal('#pageInput', 'p.40 問2');
+ok('英語は「教科書のユニット」ラベル', s.text().includes('教科書のユニット（必須）'));
+s.setVal('#unitInput', '関係代名詞');
 s.click('🔴 早めに来てほしい'); await sleep(30);
+s.click('送信する'); await sleep(100);
+ok('質問もユニット未入力では送れない', s.$('#toast').textContent.includes('教科書のユニットを入力'), s.$('#toast').textContent);
+s.setVal('#pageInput', 'Unit 4 p.40 問2');
 s.click('送信する'); await sleep(400);
 ok('質問が送れた', s.text().includes('受け付けました') && s.text().includes('関係代名詞'), s.text().slice(0, 300));
 
@@ -145,10 +154,23 @@ t.click('対応中'); await sleep(100);
 t.click('完了にする', t.$('#req-1')); await sleep(100);
 const modal = t.$('.modal');
 ok('完了モーダル', modal && modal.textContent.includes('要フォロー'));
-ok('完了モーダルにも全内容', modal.querySelector('table.detail') && modal.textContent.includes('明日テスト'));
-t.click('要フォロー', modal); t.click('類題を渡した', modal);
-modal.querySelector('#memoText').value = '変域でつまずき';
-t.click('完了にする', modal); await sleep(500);
+t.click('キャンセル', modal); await sleep(50);
+t.click('待ち'); await sleep(100);
+// 指示書（待ちタブには #2 の質問だけなので、完了タブの #1 で確認）
+t.click('完了'); await sleep(100);
+ok('質問カードに指示書ボタンは出ない', !t.$('#req-2') || !t.$('#req-2').textContent.includes('指示書'));
+t.click('対応中'); await sleep(100);
+t.click('📄 指示書', t.$('#req-1')); await sleep(100);
+const slip = t.$('#slipText');
+ok('指示書モーダル', !!slip, t.text().slice(0, 200));
+ok('指示書に依頼内容と文面', slip.textContent.includes('田中 健') && slip.textContent.includes('一次関数') && slip.textContent.includes('ワーク p.32〜35') && slip.textContent.includes('類題演習用') && slip.textContent.includes('標準') && slip.textContent.includes('テスト形式:未') && slip.textContent.includes('明日テスト') && slip.textContent.includes('作ってください'), slip.textContent);
+t.click('閉じる', t.$('.modal')); await sleep(50);
+t.click('完了にする', t.$('#req-1')); await sleep(100);
+const modal2 = t.$('.modal');
+ok('完了モーダルにも全内容', modal2.querySelector('table.detail') && modal2.textContent.includes('明日テスト'));
+t.click('要フォロー', modal2); t.click('類題を渡した', modal2);
+modal2.querySelector('#memoText').value = '変域でつまずき';
+t.click('完了にする', modal2); await sleep(500);
 ok('モーダルが閉じる', !t.$('.modal'));
 t.click('完了'); await sleep(100);
 ok('完了タブにメモ', t.$('#req-1') && t.$('#req-1').textContent.includes('変域でつまずき') && t.$('#req-1').textContent.includes('要フォロー'));

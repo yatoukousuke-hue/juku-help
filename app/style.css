@@ -210,3 +210,12 @@ table.tbl th, table.tbl td { text-align: left; padding: 6px 4px; border-bottom: 
 .login-wrap { max-width: 400px; margin: 40px auto; }
 
 @media (min-width: 900px) { .app.wide { max-width: 960px; } }
+
+/* 指示書の印刷: モーダルの中身だけを印刷する */
+pre.slip { font-size: 1rem; line-height: 1.6; }
+@media print {
+  body.teacher > .app, body.teacher > .demo-banner, #toast, .noprint { display: none !important; }
+  .modal-bg.print-target { position: static; background: none; display: block; }
+  .modal-bg.print-target .modal { max-height: none; box-shadow: none; border-radius: 0; padding: 0; max-width: none; }
+  pre.slip { background: none; padding: 0; font-size: 12pt; }
+}

@@ -22,7 +22,7 @@
 <script>
 (function () {
   'use strict';
-  const { $, $$, esc, fmtTime, elapsedText, KIND_LABEL, KIND_ICON, STATUS_LABEL, URGENCY_LABEL, PURPOSE_LABEL, AMOUNT_LABEL, DIFF_LABEL, errorText, toast, deviceId, store, api } = window.JH;
+  const { $, $$, esc, fmtTime, elapsedText, KIND_LABEL, KIND_ICON, STATUS_LABEL, URGENCY_LABEL, PURPOSE_LABEL, AMOUNT_LABEL, DIFF_LABEL, rangeField, errorText, toast, deviceId, store, api } = window.JH;
   const C = window.APP_CONFIG;
   const app = $('#app');
   const DEV = deviceId();
@@ -201,6 +201,7 @@
     const names = q ? roster.filter((s) => s.name.replace(/\s/g, '').includes(q.replace(/\s/g, '')) && (!grade || s.grade === grade))
                     : (grade ? roster.filter((s) => s.grade === grade) : []);
     const T = C.THINKING_CHECK;
+    const RF = rangeField(f.subject);
     let n = 0; const step = (title) => `<div class="step"><span class="num">${++n}</span>${title}</div>`;
 
     // 質問: 最初に「シンキングした？」
@@ -251,8 +252,10 @@
         ${checkBlock}
 
         ${step(isPrint ? '単元・範囲' : '質問の内容')}
-        <input class="input" id="unitInput" maxlength="60" placeholder="${isPrint ? '単元名（例: 一次関数、関係代名詞）' : '単元名（例: 一次関数）'}" value="${esc(f.unit_name)}">
-        <input class="input mt" id="pageInput" maxlength="40" placeholder="${isPrint ? '範囲のページ（例: ワーク p.32〜35）' : 'ページ・問題番号（例: テキスト p.32 問3）'}" value="${esc(f.page_range)}">
+        <label class="lbl" style="margin-top:0">単元名${isPrint ? '（必須）' : ''}</label>
+        <input class="input" id="unitInput" maxlength="60" placeholder="${isPrint ? '例: 一次関数、関係代名詞' : '例: 一次関数'}" value="${esc(f.unit_name)}">
+        <label class="lbl">${esc(RF.label)}${RF.required ? '（必須）' : ''}${!f.subject ? '<span class="muted small">　※教科を選ぶと言い方が変わります</span>' : ''}</label>
+        <input class="input" id="pageInput" maxlength="40" placeholder="${esc(RF.placeholder)}${!isPrint ? '、問題番号も' : ''}" value="${esc(f.page_range)}">
         ${isPrint ? `
         <label class="lbl">難易度</label>
         <div class="chips" id="diffChips">${kchips(C.PRINT_DIFFICULTIES, f.difficulty, 'diff')}</div>
@@ -322,9 +325,11 @@
       if (needCheck && C.PRINT_CHECKS.some((c) => f.checks[c.key] === undefined)) return toast('「その前に確認」の3つに答えてください', 'error');
       if (needCheck && unmet(f).length && !f.reason.trim()) return toast('先にやるか、今必要な理由を書いてください', 'error');
       if (!f.unit_name.trim()) return toast('単元名を入力してください', 'error');
+      if (rangeField(f.subject).required && !f.page_range.trim()) return toast(`${rangeField(f.subject).label}を入力してください`, 'error');
       if (!f.difficulty) return toast('難易度を選んでください', 'error');
       if (!f.amount) return toast('量を選んでください', 'error');
     } else {
+      if (rangeField(f.subject).required && !f.page_range.trim()) return toast(`${rangeField(f.subject).label}を入力してください`, 'error');
       if (!f.unit_name.trim() && !f.page_range.trim() && !f.content.trim()) return toast('単元名かページを入力してください', 'error');
     }
     const btn = $('#btnSubmit'); btn.disabled = true; btn.textContent = '送信中…';

@@ -66,6 +66,25 @@ create index if not exists requests_day_status_idx  on public.requests (day, sta
 create index if not exists requests_device_idx      on public.requests (device_id, created_at);
 create index if not exists requests_student_idx     on public.requests (student_id, day);
 
+-- 生徒ごとの目標点（講師が設定。{"英語":80,"数学":75,"5科":400} のような形）
+alter table public.students add column if not exists targets jsonb not null default '{}'::jsonb;
+
+-- 定期テストの点数（講師だけが見られる。生徒画面には出さない）
+create table if not exists public.student_scores (
+  id         bigserial primary key,
+  student_id bigint not null references public.students(id) on delete cascade,
+  period     text not null,              -- 例: 2026.1（年度.回）
+  label      text not null default '',   -- 例: 2026年度 1学期中間
+  grade_at   int,                        -- そのときの学年
+  scores     jsonb not null default '{}'::jsonb,  -- {"英語":80,"数学":75,...}
+  rank       int,
+  total      int,
+  updated_at timestamptz not null default now(),
+  unique (student_id, period)
+);
+alter table public.student_scores enable row level security;
+revoke all on public.student_scores from anon, authenticated;
+
 -- ---------- 2. 直接アクセス禁止（すべて下の関数経由にする） ----------
 
 alter table public.app_settings enable row level security;
@@ -403,6 +422,68 @@ begin
   return jsonb_build_object('imported', v_n);
 end $$;
 
+-- 点数の取り込み: [{"student_no":"中2_田中健","period":"2026.1","label":"...","grade_at":2,"scores":{...},"rank":3,"total":420}, ...]
+create or replace function public.teacher_import_scores(p_pass text, p_rows jsonb)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare v_n int := 0; v_skip int := 0; v_r jsonb; v_sid bigint;
+begin
+  perform check_pass(p_pass);
+  if jsonb_typeof(p_rows) <> 'array' then raise exception 'BAD_ROWS'; end if;
+  for v_r in select * from jsonb_array_elements(p_rows) loop
+    select id into v_sid from students where student_no = v_r->>'student_no';
+    if v_sid is null or coalesce(v_r->>'period','') = '' then v_skip := v_skip + 1; continue; end if;
+    insert into student_scores (student_id, period, label, grade_at, scores, rank, total)
+    values (v_sid, v_r->>'period', coalesce(v_r->>'label',''), (v_r->>'grade_at')::int,
+            coalesce(v_r->'scores','{}'::jsonb), (v_r->>'rank')::int, (v_r->>'total')::int)
+    on conflict (student_id, period) do update
+      set label = excluded.label, grade_at = excluded.grade_at, scores = excluded.scores,
+          rank = excluded.rank, total = excluded.total, updated_at = now();
+    v_n := v_n + 1;
+  end loop;
+  return jsonb_build_object('imported', v_n, 'skipped', v_skip);
+end $$;
+
+-- 在籍生徒の点数を全部（講師画面が起動時に読む）
+create or replace function public.teacher_scores_all(p_pass text)
+returns setof public.student_scores
+language plpgsql security definer set search_path = public as $$
+begin
+  perform check_pass(p_pass);
+  return query select sc.* from student_scores sc join students s on s.id = sc.student_id
+               where s.active order by sc.student_id, sc.period;
+end $$;
+
+-- 目標点の設定
+create or replace function public.teacher_set_targets(p_pass text, p_student_id bigint, p_targets jsonb)
+returns public.students
+language plpgsql security definer set search_path = public as $$
+declare v_s students%rowtype;
+begin
+  perform check_pass(p_pass);
+  if p_targets is null or jsonb_typeof(p_targets) <> 'object' then raise exception 'BAD_TARGETS'; end if;
+  update students set targets = p_targets, updated_at = now() where id = p_student_id returning * into v_s;
+  if not found then raise exception 'NO_STUDENT'; end if;
+  return v_s;
+end $$;
+
+-- 直近 N 日のプリント依頼（「さっきのプリントやった？」の確認用）
+create or replace function public.teacher_recent_prints(p_pass text, p_days int)
+returns setof jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform check_pass(p_pass);
+  return query
+    select jsonb_build_object('id', r.id, 'student_id', r.student_id, 'student_name', r.student_name, 'grade', r.grade,
+             'subject', r.subject, 'unit_name', r.unit_name, 'page_range', r.page_range, 'purpose', r.purpose,
+             'difficulty', r.difficulty, 'amount', r.amount, 'status', r.status, 'day', r.day,
+             'created_at', r.created_at, 'done_at', r.done_at, 'teacher', r.teacher, 'memo', r.memo, 'memo_tags', r.memo_tags)
+    from requests r
+    where r.kind = 'print' and r.status <> 'cancelled'
+      and r.day >= jst_today() - greatest(coalesce(p_days, 14), 1)
+    order by r.created_at desc;
+end $$;
+
 -- 合言葉の変更
 create or replace function public.teacher_set_pass(p_pass text, p_new text) returns boolean
 language plpgsql security definer set search_path = public as $$
@@ -424,6 +505,8 @@ grant execute on function
   public.teacher_link_student(text,bigint,bigint),
   public.teacher_history(text,bigint,date,date), public.teacher_export(text,date,date),
   public.teacher_students(text), public.teacher_import_students(text,jsonb,boolean),
+  public.teacher_import_scores(text,jsonb), public.teacher_scores_all(text),
+  public.teacher_set_targets(text,bigint,jsonb), public.teacher_recent_prints(text,int),
   public.teacher_set_pass(text,text)
 to anon, authenticated;
 

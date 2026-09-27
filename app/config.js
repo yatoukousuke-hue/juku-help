@@ -48,7 +48,7 @@ window.APP_CONFIG = {
 
   // --- 講師側「プリント指示書」の文面テンプレート ---
   // {} の中は自動で置き換わります: date, grade, name, school, subject, purpose, unit, range,
-  //   difficulty, amount, content, checks, reason, teacher
+  //   difficulty, amount, content, checks, reason, teacher, score, target, level, texts
   PRINT_SLIP_TEMPLATE:
 "【プリント作成依頼】{date}\n" +
 "{grade} {name}さん（{school}）　{subject}\n" +
@@ -58,11 +58,22 @@ window.APP_CONFIG = {
 "難易度：{difficulty}　／　量：{amount}\n" +
 "事前チェック：{checks}{reason}\n" +
 "本人の補足：{content}\n" +
+"直近の点数：{score}　目標：{target}　→ おすすめレベル：{level}\n" +
+"テキスト候補：{texts}\n" +
 "\n" +
 "上記の範囲から、{difficulty}レベルの「{purpose}」プリントを{amount}で作ってください。\n" +
 "・教科書の該当範囲（{range}）で扱う内容だけを使う\n" +
 "・問題番号を付け、最後に解答をまとめて付ける\n" +
 "・つまずきやすいポイントを1〜2行で添える",
+
+  // --- おすすめテキストのレベル判定（講師画面。点数と目標から 基礎/標準/応用 を決める） ---
+  // 直近の点数: 〜49 → 基礎、50〜74 → 標準、75〜 → 応用
+  SCORE_BANDS: { standard: 50, advanced: 75 },
+  // 目標点: これ以上なら「標準以上」を勧め、これ未満なら「基礎から」を勧める
+  TARGET_HIGH: 85,
+  TARGET_LOW: 60,
+  // 直近プリント履歴を見る日数
+  RECENT_PRINT_DAYS: 14,
 
   // --- 質問の急ぎ度の表示 ---
   URGENCY_LABELS: { now: "早めに来てほしい", later: "あとででOK" },

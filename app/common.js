@@ -118,6 +118,10 @@
       teacherStudents: (pass) => call('teacher_students', { p_pass: pass }),
       teacherImportStudents: (pass, rows, replace) => call('teacher_import_students', { p_pass: pass, p_rows: rows, p_replace: !!replace }),
       teacherSetPass: (pass, nw) => call('teacher_set_pass', { p_pass: pass, p_new: nw }),
+      teacherImportScores: (pass, rows) => call('teacher_import_scores', { p_pass: pass, p_rows: rows }),
+      teacherScoresAll: (pass) => call('teacher_scores_all', { p_pass: pass }),
+      teacherSetTargets: (pass, sid, targets) => call('teacher_set_targets', { p_pass: pass, p_student_id: sid, p_targets: targets }),
+      teacherRecentPrints: (pass, days) => call('teacher_recent_prints', { p_pass: pass, p_days: days }),
     };
   }
 
@@ -130,7 +134,7 @@
       const db = { pass: 'sensei', seq: 0, sseq: 0, students: [], requests: [] };
       [['佐藤 花子', '中2', '水谷'], ['鈴木 太郎', '中3', '本郷'], ['高橋 美咲', '中1', '水谷'],
        ['田中 健', '中2', '水谷'], ['伊藤 さくら', '中3', '富士見東'], ['渡辺 大輝', '中1', '本郷']]
-        .forEach(([name, grade, school]) => db.students.push({ id: ++db.sseq, student_no: `${grade}_${name.replace(/[\s　]/g, '')}`, name, grade, school, active: true }));
+        .forEach(([name, grade, school]) => db.students.push({ id: ++db.sseq, student_no: `${grade}_${name.replace(/[\s　]/g, '')}`, name, grade, school, active: true, targets: {} }));
       save(db); return db;
     }
     const nowIso = () => new Date().toISOString();
@@ -208,6 +212,17 @@
         save(db); return delay({ imported: n });
       },
       teacherSetPass: async (pass, nw) => { const db = load(); checkPass(db, pass); if (!nw || nw.trim().length < 4) throw new Error('PASS_TOO_SHORT'); db.pass = nw.trim(); save(db); return delay(true); },
+      teacherImportScores: async (pass, rows) => {
+        const db = load(); checkPass(db, pass); db.scores = db.scores || []; let n = 0, skip = 0;
+        for (const r of rows) { const s = db.students.find((x) => x.student_no === r.student_no); if (!s || !r.period) { skip++; continue; }
+          const ex = db.scores.find((x) => x.student_id === s.id && x.period === r.period);
+          const row = { student_id: s.id, period: r.period, label: r.label || '', grade_at: r.grade_at ?? null, scores: r.scores || {}, rank: r.rank ?? null, total: r.total ?? null };
+          if (ex) Object.assign(ex, row); else db.scores.push({ id: db.scores.length + 1, ...row }); n++; }
+        save(db); return delay({ imported: n, skipped: skip });
+      },
+      teacherScoresAll: async (pass) => { const db = load(); checkPass(db, pass); return delay((db.scores || []).filter((x) => (db.students.find((s) => s.id === x.student_id) || {}).active).map((x) => ({ ...x }))); },
+      teacherSetTargets: async (pass, sid, targets) => { const db = load(); checkPass(db, pass); const s = db.students.find((x) => x.id === sid); if (!s) throw new Error('NO_STUDENT'); s.targets = targets || {}; save(db); return delay({ ...s }); },
+      teacherRecentPrints: async (pass, days) => { const db = load(); checkPass(db, pass); const from = new Date(Date.now() - (days || 14) * 86400e3 + 9 * 3600e3).toISOString().slice(0, 10); return delay(db.requests.filter((r) => r.kind === 'print' && r.status !== 'cancelled' && r.day >= from).sort((a, b) => b.created_at.localeCompare(a.created_at)).map((r) => ({ id: r.id, student_id: r.student_id, student_name: r.student_name, grade: r.grade, subject: r.subject, unit_name: r.unit_name, page_range: r.page_range, purpose: r.purpose, difficulty: r.difficulty, amount: r.amount, status: r.status, day: r.day, created_at: r.created_at, done_at: r.done_at, teacher: r.teacher, memo: r.memo, memo_tags: r.memo_tags }))); },
     };
   }
 

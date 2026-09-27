@@ -229,3 +229,14 @@ pre.slip { font-size: 1rem; line-height: 1.6; }
 /* 受付から長く経っている依頼（待ち・対応中とも）は時間を赤く */
 .req.longwait .l1 .time { color: var(--danger); }
 .req .l1 .time .sub { color: var(--muted); font-weight: 400; font-size: .75rem; }
+
+/* カードの「パッと見」ブロック（点数・おすすめ・前回のプリント） */
+.assist { margin-top: 6px; background: var(--bg); border-radius: 10px; padding: 6px 10px; font-size: .85rem; }
+.assist .assist-row { padding: 2px 0; }
+.assist .assist-row.warn { color: var(--danger); font-weight: 700; }
+.assist .sub { color: var(--muted); font-weight: 400; font-size: .78rem; }
+.mat-list .mat { padding: 4px 6px; border-radius: 6px; margin-bottom: 3px; }
+.mat-list .mat.hit { background: var(--primary-soft); }
+.targets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+.targets label { font-size: .85rem; font-weight: 700; }
+.targets input { margin-top: 2px; padding: 8px 10px; }

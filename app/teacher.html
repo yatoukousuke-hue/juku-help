@@ -18,6 +18,7 @@
 <div class="app wide" id="app"></div>
 
 <script src="config.js"></script>
+<script src="materials.js"></script>
 <script src="lib/supabase.js"></script>
 <script src="common.js"></script>
 <script>
@@ -42,6 +43,9 @@
   let wakeLock = null;
   const expanded = new Set();     // 「詳細」を開いているカードの id
   let armed = { id: null, until: 0 };  // 「取消」を1回押した状態（自動更新をまたいでも4秒間保持）
+  let scoresAll = [];             // 点数（講師だけ）
+  let recentPrints = [];          // 直近のプリント依頼
+  let ctxTimer = null;
   const firstOfMonth = (d) => ymd(new Date(d.getFullYear(), d.getMonth(), 1));
   const lastOfMonth = (d) => ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0));
   let recState = { sid: '', from: firstOfMonth(new Date()), to: todayYmd(), hist: null, report: '' };
@@ -133,7 +137,9 @@
     refresh(true);
     startTimer();
     requestWakeLock();
-    ensureStudents();
+    loadContext();
+    if (ctxTimer) clearInterval(ctxTimer);
+    ctxTimer = setInterval(() => { if (document.visibilityState === 'visible') loadContext(); }, 60000);
   }
   function startTimer() { if (timer) clearInterval(timer); timer = setInterval(() => { if (document.visibilityState === 'visible') refresh(false); }, (C.REFRESH_SEC_TEACHER || 5) * 1000); }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && pass && rows) { refresh(false); requestWakeLock(); } });
@@ -262,6 +268,16 @@
     rows.push(['単元名', esc(r.unit_name || '（未記入）')]);
     rows.push([rangeField(r.subject).label, esc(r.page_range || '（未記入）')]);
     rows.push([r.kind === 'print' ? '補足' : '一言', esc(r.content || '（なし）')]);
+    if (r.kind === 'print') {
+      const li = levelInfo(r); const rt = recommendTexts(r, li.rec); const ps = priorSummary(r);
+      const hist = li.st ? scoreHistory(li.st.id).slice(0, 4) : [];
+      rows.push(['点数（新しい順）', hist.length ? hist.map((x) => `${esc(x.label || x.period)}：${['英語', '数学', '国語', '理科', '社会'].map((k) => x.scores && x.scores[k] != null ? `${k.slice(0, 1)}${x.scores[k]}` : '').filter(Boolean).join(' ')}${x.total != null ? `（5科${x.total}）` : ''}`).join('<br>') : '（データなし）']);
+      const tg = (li.st && li.st.targets) || {};
+      rows.push(['目標点', `${Object.keys(tg).length ? Object.entries(tg).map(([k, v]) => `${esc(k)}${esc(v)}`).join('・') : '（未設定）'}${li.st ? ` <button class="btn xs ghost" data-act="targets" data-id="${r.id}">目標を設定</button>` : ''}`]);
+      rows.push(['おすすめ', `${li.rec ? `<b>${LEVEL_JA[li.rec]}</b>レベル` : 'レベル判定なし（点数・目標がない）'}${li.warns.length ? `<br><span class="ng-txt">⚠ ${li.warns.map(esc).join('。')}</span>` : ''}`]);
+      rows.push(['テキスト候補', rt.all.length ? `<div class="mat-list">${rt.all.filter((m) => m.level.includes(rt.level)).map((m) => `<div class="mat ${rt.picked.includes(m) ? 'hit' : ''}"><b>${esc(m.name)}</b> <span class="sub">${m.level.map((l) => LEVEL_JA[l]).join('・')}／${m.uses.map((u) => (PURPOSE_LABEL[u] || u).replace(/用$/, '').replace('苦手だからポイント確認から', 'ポイント確認')).join('・')}</span><br><span class="sub">${esc(m.note)}</span></div>`).join('')}</div>` : '（この教科の教材データなし）']);
+      rows.push(['直近のプリント', ps.list.length ? ps.list.slice(0, 5).map((p) => esc(shortPrint(p)) + (p.memo_tags && p.memo_tags.length ? `<span class="sub">　${esc(p.memo_tags.join('・'))}</span>` : '')).join('<br>') : '（なし）']);
+    }
     rows.push(['受付', `#${r.receipt_no}　${fmtTime(r.created_at)}${r.started_at ? `　→ 対応開始 ${fmtTime(r.started_at)}` : ''}${r.done_at ? `　→ ${r.status === 'cancelled' ? '取消' : '完了'} ${fmtTime(r.done_at)}` : ''}${r.teacher ? `　担当 ${esc(r.teacher)}` : ''}`]);
     return `<table class="detail">${rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')}</table>`;
   }
@@ -295,6 +311,7 @@
       <div class="l1"><span class="where">${esc(r.classroom)}</span><span class="who">${esc(r.student_name)}${r.grade || schoolOf(r) ? `<span class="muted small">（${esc(r.grade)}${schoolOf(r) ? '・' + esc(schoolOf(r)) : ''}）</span>` : ''}${!r.student_id ? ' <span class="unlinked">名簿外</span>' : ''}</span><span class="time">#${r.receipt_no} ${timeTxt}</span></div>
       <div class="l2"><span class="kind">${KIND_ICON[r.kind]}${KIND_LABEL[r.kind]}</span>${r.urgency === 'now' ? '<span class="badge now">早めに</span>' : ''}<span class="badge ${r.status}" style="background:transparent;padding:0">${esc(r.subject)}</span><span class="content">${detailHtml(r)}</span></div>
       ${flagsHtml(r)}${simBadge}
+      ${assistHtml(r)}
       ${isOpen ? detailTable(r) : ''}
       ${(r.memo || tags) ? `<div class="memo">${tags}${esc(r.memo || '')}</div>` : ''}
       <div class="l3"><span class="meta">${fmtTime(r.created_at)} 受付${r.teacher ? `・担当 ${esc(r.teacher)}` : ''}</span>${detailBtn}${slipBtn}${linkBtn}${cancelBtn}${btns}</div>
@@ -358,6 +375,7 @@
     const r = rows.find((x) => x.id === id); if (!r) return;
     if (act === 'detail') { if (expanded.has(id)) expanded.delete(id); else expanded.add(id); return renderList(); }
     if (act === 'slip') return openSlipModal(r);
+    if (act === 'targets') return openTargetsModal(r);
     if (act === 'group') { filterKind = 'print'; filterGrade = r.grade; filterSubject = r.subject; const sc = schoolOf(r); filterSchool = !sc ? '' : (C.SCHOOLS.includes(sc) ? sc : C.SCHOOL_OTHER); sortMode = 'group'; return renderBody(); }
     if (act === 'start') return doUpdate(id, 'start', tname, null, null);
     if (act === 'reopen') return doUpdate(id, 'reopen', null, null, null);
@@ -415,7 +433,27 @@
       difficulty: DIFF_LABEL[r.difficulty] || '標準', amount: AMOUNT_LABEL[r.amount] || 'ふつう',
       content: r.content || 'なし', checks, reason: c.reason ? `（それでも必要な理由: ${c.reason}）` : '', teacher: r.teacher || tname,
     };
+    const li = levelInfo(r); const rt = recommendTexts(r, li.rec);
+    vars.score = li.cur ? `${li.cur.value}点（${li.cur.label}）` : 'データなし';
+    vars.target = li.target != null ? String(li.target) : '未設定';
+    vars.level = li.rec ? LEVEL_JA[li.rec] : '判定なし';
+    vars.texts = rt.picked.slice(0, 3).map((m) => m.name).join('／') || 'なし';
     return String(C.PRINT_SLIP_TEMPLATE || '').replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
+  }
+  function openTargetsModal(r) {
+    const st = students.find((x) => x.id === r.student_id); if (!st) return;
+    const tg = st.targets || {};
+    const keys = ['英語', '数学', '国語', '理科', '社会', '5科'];
+    const bg = modal(`<h3>目標点：${esc(st.name)}（${esc(st.grade)}）</h3>
+      <div class="small muted">次の定期テストの目標。空欄でもOK。おすすめレベルの判定に使います（目標${C.TARGET_HIGH || 85}以上→標準以上、${C.TARGET_LOW || 60}未満→基礎から）。</div>
+      <div class="targets">${keys.map((k) => `<label>${esc(k)}<input class="input" type="number" inputmode="numeric" min="0" max="${k === '5科' ? 500 : 100}" data-tk="${esc(k)}" value="${tg[k] != null ? esc(tg[k]) : ''}"></label>`).join('')}</div>
+      <div class="row mt" style="margin-top:16px"><button class="btn ghost" id="tgCancel">キャンセル</button><span class="spacer"></span><button class="btn" id="tgSave">保存</button></div>`);
+    $('#tgCancel', bg).onclick = () => bg.remove();
+    $('#tgSave', bg).onclick = async () => {
+      const out = {}; $$('[data-tk]', bg).forEach((i) => { const v = i.value.trim(); if (v !== '' && !isNaN(Number(v))) out[i.dataset.tk] = Number(v); });
+      try { const s2 = await api.teacherSetTargets(pass, st.id, out); Object.assign(st, s2); bg.remove(); toast('目標を保存しました', 'ok'); renderList(); }
+      catch (e) { toast(errorText(e), 'error'); }
+    };
   }
   function openSlipModal(r) {
     const text = buildSlip(r);
@@ -430,6 +468,84 @@
       try { await navigator.clipboard.writeText(text); toast('コピーしました', 'ok'); }
       catch (_) { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('コピーしました', 'ok'); }
     };
+  }
+  // 名簿・点数・直近プリントをまとめて読む（カードのおすすめ表示に使う）
+  async function loadContext() {
+    try {
+      const [st, sc, rp] = await Promise.all([api.teacherStudents(pass), api.teacherScoresAll(pass), api.teacherRecentPrints(pass, C.RECENT_PRINT_DAYS || 14)]);
+      students = st; scoresAll = sc; recentPrints = rp;
+      if (['waiting', 'in_progress', 'done'].includes(tab)) renderList();
+    } catch (_) {}
+  }
+  const LEVEL_JA = { basic: '基礎', standard: '標準', advanced: '応用' };
+  const LEVEL_ORDER = ['basic', 'standard', 'advanced'];
+  const periodDesc = (a, b) => String(b.period).localeCompare(String(a.period));
+  // 生徒の点数履歴（新しい順）
+  function scoreHistory(sid) { return scoresAll.filter((x) => x.student_id === sid).sort(periodDesc); }
+  function latestScore(sid, subject) {
+    for (const x of scoreHistory(sid)) { const v = x.scores && x.scores[subject]; if (v != null && v !== '') return { value: Number(v), label: x.label || x.period, period: x.period }; }
+    return null;
+  }
+  // 点数と目標からレベル（基礎/標準/応用）を判定
+  function levelInfo(r) {
+    const st = r.student_id ? students.find((x) => x.id === r.student_id) : null;
+    const cur = st ? latestScore(st.id, r.subject) : null;
+    const hist = st ? scoreHistory(st.id).map((x) => x.scores && x.scores[r.subject]).filter((v) => v != null && v !== '').map(Number) : [];
+    const prev = hist.length >= 2 ? hist[1] : null;
+    const targets = (st && st.targets) || {};
+    const target = targets[r.subject] != null ? Number(targets[r.subject]) : null;
+    const bands = C.SCORE_BANDS || { standard: 50, advanced: 75 };
+    const bandScore = cur ? (cur.value >= bands.advanced ? 'advanced' : cur.value >= bands.standard ? 'standard' : 'basic') : null;
+    const bandTarget = target != null ? (target >= (C.TARGET_HIGH || 85) ? 'advanced' : target < (C.TARGET_LOW || 60) ? 'basic' : 'standard') : null;
+    let rec = null;
+    if (bandScore && bandTarget) { rec = LEVEL_ORDER[Math.max(LEVEL_ORDER.indexOf(bandScore), LEVEL_ORDER.indexOf(bandTarget))]; if (bandScore === 'basic' && rec === 'advanced') rec = 'standard'; }
+    else rec = bandScore || bandTarget;
+    const warns = [];
+    if (r.difficulty === 'basic' && bandTarget === 'advanced') warns.push('目標が高いので基礎だけでは物足りないかも');
+    if (r.difficulty === 'basic' && bandScore === 'advanced') warns.push('得意なので基礎は簡単すぎるかも');
+    if (r.difficulty === 'advanced' && bandScore === 'basic') warns.push('苦手なので応用は早いかも（まず基礎〜標準）');
+    if (r.difficulty === 'advanced' && bandTarget === 'basic') warns.push('目標に対して応用は重いかも');
+    return { st, cur, prev, target, targetTotal: targets['5科'] != null ? Number(targets['5科']) : null, bandScore, bandTarget, rec, warns };
+  }
+  // おすすめテキスト（教科 × レベル × 目的）
+  function recommendTexts(r, level) {
+    const list = (window.MATERIALS || {})[r.subject] || [];
+    const lv = level || r.difficulty || 'standard';
+    const byBoth = list.filter((m) => m.level.includes(lv) && (!r.purpose || m.uses.includes(r.purpose)));
+    const byLevel = list.filter((m) => m.level.includes(lv));
+    const picked = (byBoth.length ? byBoth : byLevel);
+    return { picked, all: list, level: lv, exact: byBoth.length > 0 };
+  }
+  // その生徒の直近プリント（この依頼を除く）
+  function priorPrints(r) {
+    return recentPrints.filter((p) => p.id !== r.id && (r.student_id ? p.student_id === r.student_id : (!p.student_id && p.student_name === r.student_name)));
+  }
+  function priorSummary(r) {
+    const list = priorPrints(r);
+    if (!list.length) return { list, today: 0, week: 0, last: null, ask: false };
+    const today = list.filter((p) => p.day === r.day).length;
+    const weekFrom = new Date(new Date(r.created_at).getTime() - 7 * 86400e3).toISOString().slice(0, 10);
+    const week = list.filter((p) => p.day >= weekFrom).length;
+    const last = list[0];
+    const ask = last.day === r.day || (last.status === 'done' && (Date.now() - new Date(last.done_at || last.created_at).getTime()) < 3 * 86400e3);
+    return { list, today, week, last, ask };
+  }
+  const shortPrint = (p) => `${fmtDate(p.created_at)} ${p.subject}「${p.unit_name || '-'}」${PURPOSE_LABEL[p.purpose] ? '(' + PURPOSE_LABEL[p.purpose].replace(/用$/, '') + ')' : ''}${p.status === 'done' ? '済' : p.status === 'waiting' ? '待ち' : '対応中'}`;
+  // カードの「パッと見」ブロック（プリント依頼だけ）
+  function assistHtml(r) {
+    if (r.kind !== 'print') return '';
+    const li = levelInfo(r);
+    const rt = recommendTexts(r, li.rec);
+    const ps = priorSummary(r);
+    const parts = [];
+    let scoreTxt = li.cur ? `直近 ${esc(r.subject)}${li.cur.value}点<span class="sub">（${esc(li.cur.label)}${li.prev != null ? '・前回' + li.prev : ''}）</span>` : `<span class="sub">${esc(r.subject)}の点数データなし</span>`;
+    if (li.target != null) scoreTxt += `・目標${li.target}`;
+    scoreTxt += li.rec ? ` → <b>${LEVEL_JA[li.rec]}</b>` : '';
+    parts.push(`<div class="assist-row">📈 ${scoreTxt}${li.rec && r.difficulty && li.rec !== r.difficulty ? `<span class="sub">（依頼は${esc(DIFF_LABEL[r.difficulty] || '')}）</span>` : ''}</div>`);
+    if (rt.picked.length) parts.push(`<div class="assist-row">📚 ${LEVEL_JA[rt.level]}：<b>${rt.picked.slice(0, 3).map((m) => esc(m.name)).join('／')}</b>${rt.picked.length > 3 ? `<span class="sub"> ほか${rt.picked.length - 3}</span>` : ''}</div>`);
+    if (li.warns.length) parts.push(`<div class="assist-row warn">⚠ ${li.warns.map(esc).join('。')}</div>`);
+    if (ps.last) parts.push(`<div class="assist-row ${ps.ask ? 'warn' : ''}">📄 前回：${esc(shortPrint(ps.last))}${ps.today ? `　<b>今日${ps.today + 1}枚目</b>` : ''}${ps.week >= 3 ? `　<b>7日で${ps.week + 1}枚目</b>` : ''}${ps.ask ? '　→ 「さっきのプリントやった？」' : ''}</div>`);
+    return `<div class="assist">${parts.join('')}</div>`;
   }
   async function ensureStudents() { if (!students.length) { try { students = await api.teacherStudents(pass); } catch (e) { toast(errorText(e), 'error'); } } return students; }
   async function openLinkModal(r) {
@@ -504,6 +620,7 @@
           <div class="tile"><div class="v" style="color:var(--danger)">${a.follow.length}</div><div class="k">${esc(C.FOLLOW_TAG)}</div></div>
           <div class="tile"><div class="v">${a.valid.length}</div><div class="k">合計（取消除く）</div></div>
         </div>
+        ${(() => { const h = scoreHistory(Number(s.sid)); return h.length ? `<div class="section-title" style="margin-top:14px">定期テストの点数（講師だけ）</div><table class="tbl"><tr><th>テスト</th><th>英</th><th>数</th><th>国</th><th>理</th><th>社</th><th>5科</th><th>順位</th></tr>${h.map((x) => `<tr><td>${esc(x.label || x.period)}</td>${['英語', '数学', '国語', '理科', '社会'].map((k) => `<td>${x.scores && x.scores[k] != null ? esc(x.scores[k]) : '-'}</td>`).join('')}<td>${x.total != null ? esc(x.total) : '-'}</td><td>${x.rank != null ? esc(x.rank) : '-'}</td></tr>`).join('')}</table>` : ''; })()}
         <button class="btn block mt" id="rReport">📋 保護者報告のもとを作る</button>
         <div id="rReportBox"></div>
       </div>
@@ -605,6 +722,14 @@
         ${students.map((s) => `<tr><td>${esc(s.grade)}</td><td>${esc(s.name)}</td><td>${esc(s.school)}</td><td>${s.active ? '' : '<span class="muted">無効</span>'}</td></tr>`).join('')}</table>
       </div>
       <div class="card">
+        <h2>定期テストの点数の取り込み（講師だけが見られます）</h2>
+        <p class="small muted">テスト名（例: 2026.3 = 2026年度 2学期中間）を入れ、スプレッドシートの「氏名・英語・数学・国語・理科・社会」の列をコピーして貼り付けてください。名簿の氏名と一致する行だけ取り込みます（空白の違いは無視）。</p>
+        <div class="row"><input class="input" id="scPeriod" placeholder="2026.3" style="width:110px"><input class="input" id="scLabel" placeholder="表示名（例: 2026年度 2学期中間）" style="flex:1"></div>
+        <textarea class="input mt" id="scText" style="min-height:100px" placeholder="田中健	62	71	55	80	66"></textarea>
+        <div class="row mt"><button class="btn" id="scImport">取り込む</button><span class="small muted" id="scPreview"></span></div>
+        <div class="small muted mt">点数データ：${scoresAll.length}件（${new Set(scoresAll.map((x) => x.student_id)).size}人）</div>
+      </div>
+      <div class="card">
         <h2>通知（画面を閉じているとき）</h2>
         <div class="small muted">状態：${notifState}。iPhone は「ホーム画面に追加」したアイコンから開いたときだけ使えます。音とバッジは画面を開いていれば通知の許可なしで動きます。</div>
         ${canNotify() && Notification.permission === 'default' ? '<button class="btn mt" id="btnNotify">通知を許可する</button>' : ''}
@@ -643,6 +768,23 @@
         }
         const res = await api.teacherImportStudents(pass, rows, replace); toast(`${rs.length}人を取り込みました`, 'ok'); renderSettings(body);
       } catch (e) { toast(errorText(e), 'error'); }
+    };
+    const normName = (x) => String(x || '').replace(/[\s　]/g, '');
+    const parseScores = () => {
+      const period = $('#scPeriod').value.trim(); const label = $('#scLabel').value.trim() || period;
+      const text = $('#scText').value.trim(); if (!period || !text) return [];
+      const byName = new Map(students.filter((s) => s.active).map((s) => [normName(s.name), s]));
+      return text.split(/\r?\n/).map((line) => line.split(/\t|,/).map((c) => c.trim())).filter((c) => c[0] && byName.has(normName(c[0])) && c.length >= 2)
+        .map((c) => { const s = byName.get(normName(c[0])); const sc = {}; ['英語', '数学', '国語', '理科', '社会'].forEach((k, i) => { const v = Number(c[i + 1]); if (c[i + 1] !== '' && c[i + 1] != null && !isNaN(v)) sc[k] = v; });
+          const vals = Object.values(sc); return { student_no: s.student_no, period, label, grade_at: null, scores: sc, rank: null, total: vals.length === 5 ? vals.reduce((a, b) => a + b, 0) : null }; });
+    };
+    $('#scText').addEventListener('input', () => { const rs = parseScores(); $('#scPreview').textContent = rs.length ? `${rs.length}人分を読み取りました` : ''; });
+    $('#scImport').onclick = async () => {
+      const rs = parseScores(); if (!rs.length) return toast('読み取れる行がありません（テスト名と氏名を確認）', 'error');
+      const btn = $('#scImport');
+      if (btn.dataset.armed !== '1') { btn.dataset.armed = '1'; btn.textContent = `${rs.length}人分を取り込む（もう一度押す）`; setTimeout(() => { if (btn.isConnected) { btn.dataset.armed = ''; btn.textContent = '取り込む'; } }, 5000); return; }
+      try { const res = await api.teacherImportScores(pass, rs); toast(`${res.imported}件を取り込みました`, 'ok'); await loadContext(); renderSettings(body); }
+      catch (e) { toast(errorText(e), 'error'); }
     };
     if ($('#btnNotify')) $('#btnNotify').onclick = async () => { try { const p = await Notification.requestPermission(); toast(p === 'granted' ? '通知を許可しました' : '許可されませんでした'); renderSettings(body); } catch (_) {} };
     $('#btnPass').onclick = async () => {

@@ -23,6 +23,7 @@ function load(file) {
   let html = read(file);
   // 外部スクリプトをインライン化。config は Supabase 未設定（お試しモード）に差し替える
   html = html.replace(/<script src="config.js"><\/script>/, () => `<script>${read('config.js').replace(/SUPABASE_URL: "[^"]*"/, 'SUPABASE_URL: ""')}</script>`)
+             .replace(/<script src="materials.js"><\/script>/, () => `<script>${read('materials.js')}</script>`)
              .replace(/<script src="lib\/supabase.js"><\/script>/, '')
              .replace(/<script src="common.js"><\/script>/, () => `<script>${read('common.js')}</script>`)
              .replace(/<script src="lib\/qrcode.js"><\/script>/, () => `<script>${read('lib/qrcode.js')}</script>`);
@@ -136,6 +137,40 @@ let t = load('teacher.html'); await sleep(300);
 ok('ログイン画面', t.text().includes('合言葉'));
 t.setVal('#pass', 'sensei'); t.setVal('#tname', '山田'); t.click('入る'); await sleep(600);
 ok('一覧に3件', t.w.document.querySelectorAll('.req').length === 3, t.text().slice(0, 300));
+// 点数・目標を入れて、カードの「パッと見」を確認
+{
+  const api = t.w.JH.api;
+  const st = await api.teacherStudents('sensei');
+  const tanaka = st.find((x) => x.name === '田中 健'); const sato = st.find((x) => x.name === '佐藤 花子');
+  const imp = await api.teacherImportScores('sensei', [
+    { student_no: tanaka.student_no, period: '2026.1', label: '2026年度 1学期中間', grade_at: 2, scores: { 英語: 70, 数学: 42, 国語: 60, 理科: 55, 社会: 50 }, rank: 30, total: 277 },
+    { student_no: tanaka.student_no, period: '2025.5', label: '2025年度 学年末', grade_at: 1, scores: { 数学: 48 }, rank: null, total: null },
+    { student_no: sato.student_no, period: '2026.1', label: '2026年度 1学期中間', grade_at: 2, scores: { 数学: 92 }, rank: 2, total: 460 },
+  ]);
+  ok('点数の取り込み（お試し）', imp.imported === 3);
+  await api.teacherSetTargets('sensei', sato.id, { 数学: 95, '5科': 470 });
+}
+await sleep(1200);
+// loadContext は起動時に1回。テストでは再ログインで読み直す
+storage.setItem('jh_tpass', JSON.stringify('sensei'));
+t = load('teacher.html'); await sleep(900);
+{
+  const c1 = t.$('#req-1'), c3 = t.$('#req-3');
+  ok('田中（数学42点・依頼は標準）→ 基礎レベルと前回点', c1.querySelector('.assist') && c1.querySelector('.assist').textContent.includes('直近 数学42点') && c1.querySelector('.assist').textContent.includes('前回48') && c1.querySelector('.assist').textContent.includes('基礎'), c1.querySelector('.assist') && c1.querySelector('.assist').textContent);
+  ok('田中にテキスト候補（基礎・類題演習）', c1.querySelector('.assist').textContent.includes('📚 基礎') && /フォレスタ ドリル|Keyワーク|iワーク テキスト|必修テキスト/.test(c1.querySelector('.assist').textContent));
+  ok('佐藤（92点・目標95・依頼は基礎）→ 応用＋注意', c3.querySelector('.assist').textContent.includes('応用') && c3.querySelector('.assist').textContent.includes('⚠') && c3.querySelector('.assist').textContent.includes('簡単すぎる'), c3.querySelector('.assist').textContent);
+  ok('質問カードにはブロックなし', !t.$('#req-2').querySelector('.assist'));
+  t.click('詳細', c1); await sleep(100);
+  const dt = t.$('#req-1').querySelector('table.detail').textContent;
+  ok('詳細に点数履歴・目標・テキスト候補・直近プリント', dt.includes('2026年度 1学期中間') && dt.includes('目標点') && dt.includes('テキスト候補') && dt.includes('直近のプリント'), dt.slice(0, 400));
+  t.click('目標を設定', t.$('#req-1')); await sleep(100);
+  const tm = t.$('.modal');
+  ok('目標モーダル', tm && tm.textContent.includes('目標点：田中 健'));
+  tm.querySelector('[data-tk="数学"]').value = '70';
+  t.click('保存', tm); await sleep(300);
+  ok('目標保存後にカードへ反映', t.$('#req-1').querySelector('.assist').textContent.includes('目標70'), t.$('#req-1').querySelector('.assist').textContent);
+  t.click('閉じる', t.$('#req-1')); await sleep(50);
+}
 ok('学年・教科・並び順のフィルタがある', t.$('#fGrade') && t.$('#fSubject') && t.$('#fSort'));
 ok('同じ単元バッジ（田中と佐藤の一次関数）', t.$('#req-1').textContent.includes('同じ単元 あと1人') && t.$('#req-3').textContent.includes('同じ単元 あと1人'));
 ok('まとめバーにグループ（学校込み）', t.$('#groupBar').textContent.includes('中2・水谷 数学「一次関数」') && t.$('#groupBar').textContent.includes('2人'), t.$('#groupBar').textContent);
@@ -217,12 +252,35 @@ ok('完了タブにメモ', t.$('#req-1') && t.$('#req-1').textContent.includes(
 t.click('待ち'); await sleep(100);
 t.click('取消', t.$('#req-2')); await sleep(50);
 ok('取消は2段階', t.$('#req-2') && t.$('#req-2').textContent.includes('本当に取消'), (t.$('#req-2') || {textContent: 'no card: ' + t.$('#list').textContent.slice(0, 200)}).textContent);
+// 前回のプリント表示: 田中がもう1枚頼む（別端末扱い）
+storage.setItem('jh_device_id', 'd-fourth-device-xxxx');
+{
+  const s4 = load('index.html'); await sleep(300);
+  s4.click('📄 プリントがほしい'); await sleep(50);
+  s4.click('変更'); await sleep(30); s4.click('中2'); await sleep(30); s4.click('田中 健', s4.$('#nameChips')); await sleep(30);
+  s4.click('3階大教室'); s4.click('数学'); await sleep(30);
+  s4.click('苦手だからポイント確認から'); await sleep(30);
+  s4.setVal('#unitInput', '一次関数'); s4.setVal('#pageInput', 'p.36');
+  s4.click('基礎'); s4.click('少なめ'); await sleep(30);
+  s4.click('送信する'); await sleep(400);
+  ok('田中の2枚目が送れた', s4.text().includes('受け付けました'));
+}
+storage.setItem('jh_tpass', JSON.stringify('sensei'));
+t = load('teacher.html'); await sleep(900);
+{
+  const c4 = t.$('#req-4');
+  ok('前回のプリントと「さっきのプリントやった？」', c4 && c4.querySelector('.assist') && c4.querySelector('.assist').textContent.includes('前回：') && c4.querySelector('.assist').textContent.includes('今日2枚目') && c4.querySelector('.assist').textContent.includes('さっきのプリントやった？'), c4 && c4.querySelector('.assist') && c4.querySelector('.assist').textContent);
+  t.click('📄 指示書', c4); await sleep(100);
+  ok('指示書におすすめレベルとテキスト', t.$('#slipText').textContent.includes('おすすめレベル：標準') && t.$('#slipText').textContent.includes('テキスト候補：'), t.$('#slipText').textContent.slice(-300));
+  t.click('閉じる', t.$('.modal')); await sleep(50);
+}
 // 記録
 t.click('記録'); await sleep(400);
 const sel = t.$('#rSid'); sel.value = Array.from(sel.options).find((o) => o.textContent.includes('田中')).value;
 t.click('先月'); t.click('今月'); await sleep(30);
 t.click('表示'); await sleep(400);
 ok('集計に目的内訳', t.text().includes('プリント') && t.text().includes('類題演習用'), t.$('#rResult').textContent.slice(0, 300));
+ok('記録タブに点数表', t.$('#rResult').textContent.includes('定期テストの点数') && t.$('#rResult').textContent.includes('2026年度 1学期中間'));
 t.click('📋 保護者報告'); await sleep(50);
 const rep = t.$('#reportText').textContent;
 ok('報告文に単元と目的', rep.includes('一次関数') && rep.includes('類題演習用') && rep.includes('変域でつまずき'), rep);

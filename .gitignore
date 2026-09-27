@@ -5,3 +5,6 @@ dev/roster_import.json
 dev/schema_json.txt
 .vercel/
 app/.vercel/
+dev/scores.xlsx
+dev/scores_import.json
+dev/kyozai.txt

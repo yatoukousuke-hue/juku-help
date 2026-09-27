@@ -165,6 +165,28 @@ ok('replace import deactivates missing', after.length === 1 && after[0].student_
 const tsAfter = await rpcSet('teacher_students', { p_pass: PASS });
 ok('inactive still kept for teacher', tsAfter.length === 2);
 
+console.log('\n-- 点数・目標・直近プリント');
+const imp2 = await rpc('teacher_import_scores', { p_pass: PASS, p_rows: JSON.stringify([
+  { student_no: '1001', period: '2026.1', label: '2026年度 1学期中間', grade_at: 2, scores: { 英語: 70, 数学: 62, 国語: 80, 理科: 55, 社会: 66 }, rank: 12, total: 333 },
+  { student_no: '1001', period: '2025.5', label: '2025年度 学年末', grade_at: 1, scores: { 英語: 65, 数学: 58 }, rank: null, total: null },
+  { student_no: 'nope', period: '2026.1', label: '', grade_at: 2, scores: {}, rank: null, total: null },
+]) });
+ok('scores imported 2, skipped 1', imp2[0].imported === 2 && imp2[0].skipped === 1, JSON.stringify(imp2));
+const imp3 = await rpc('teacher_import_scores', { p_pass: PASS, p_rows: JSON.stringify([{ student_no: '1001', period: '2026.1', label: 'x', grade_at: 2, scores: { 数学: 64 }, rank: 10, total: 300 }]) });
+const allSc = await rpcSet('teacher_scores_all', { p_pass: PASS });
+ok('re-import upserts (still 2 rows, math updated)', allSc.length === 2 && allSc.find((x) => x.period === '2026.1').scores['数学'] === 64, JSON.stringify(allSc));
+await expectError('scores need pass', () => rpcSet('teacher_scores_all', { p_pass: 'x' }), 'BAD_PASS');
+const tg = (await rpcSet('teacher_set_targets', { p_pass: PASS, p_student_id: hanako.id, p_targets: JSON.stringify({ 数学: 80, '5科': 400 }) }))[0];
+ok('targets saved', tg.targets['数学'] === 80);
+const tsT = await rpcSet('teacher_students', { p_pass: PASS });
+ok('teacher_students includes targets', tsT.find((x) => x.id === hanako.id).targets['5科'] === 400);
+await expectError('bad targets', () => rpcSet('teacher_set_targets', { p_pass: PASS, p_student_id: hanako.id, p_targets: '[]' }), 'BAD_TARGETS');
+const rp = await rpcSet('teacher_recent_prints', { p_pass: PASS, p_days: 14 });
+ok('recent prints: r2 (done) yes, r3 (cancelled) no, question no', rp.length === 1 && rp[0].teacher_recent_prints.id === r2.id && rp[0].teacher_recent_prints.status === 'done', JSON.stringify(rp));
+await db.exec('set role anon');
+await expectError('anon cannot read student_scores', () => db.query('select * from student_scores'), 'permission denied');
+await db.exec('reset role');
+
 console.log('\n-- 合言葉変更');
 await expectError('too short', () => rpc('teacher_set_pass', { p_pass: PASS, p_new: '12' }), 'PASS_TOO_SHORT');
 await rpc('teacher_set_pass', { p_pass: PASS, p_new: 'newpass' });

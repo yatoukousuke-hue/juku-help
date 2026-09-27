@@ -60,6 +60,7 @@ alter table public.requests add column if not exists difficulty text;
 alter table public.requests add column if not exists unit_name  text not null default '';
 alter table public.requests add column if not exists page_range text not null default '';
 alter table public.requests add column if not exists checks     jsonb not null default '{}'::jsonb;
+alter table public.requests add column if not exists school     text not null default '';
 
 create index if not exists requests_day_status_idx  on public.requests (day, status);
 create index if not exists requests_device_idx      on public.requests (device_id, created_at);
@@ -100,6 +101,7 @@ language sql stable as $$
     'receipt_no', r.receipt_no,
     'day', r.day,
     'student_name', r.student_name,
+    'school', r.school,
     'classroom', r.classroom,
     'seat', r.seat,
     'kind', r.kind,
@@ -125,16 +127,18 @@ $$;
 
 -- ---------- 4. 生徒側の関数（ログイン不要） ----------
 
--- 名簿（学校名は返さない）
+-- 名簿（生徒画面用: 学校名は本人確認と自動入力のために返す）
+drop function if exists public.list_students();
 create or replace function public.list_students()
-returns table (id bigint, student_no text, name text, grade text)
+returns table (id bigint, student_no text, name text, grade text, school text)
 language sql security definer set search_path = public stable as $$
-  select id, student_no, name, grade
+  select id, student_no, name, grade, school
   from students where active order by grade, student_no, name
 $$;
 
 -- 依頼を送る（古い版の関数が残っていれば消す）
 drop function if exists public.create_request(text,bigint,text,text,text,text,text,text,text,int,text);
+drop function if exists public.create_request(text,bigint,text,text,text,text,text,text,text,int,text,text,text,text,text,text,jsonb);
 create or replace function public.create_request(
   p_device_id    text,
   p_student_id   bigint,
@@ -152,12 +156,14 @@ create or replace function public.create_request(
   p_difficulty   text default null,
   p_unit_name    text default '',
   p_page_range   text default '',
-  p_checks       jsonb default '{}'::jsonb
+  p_checks       jsonb default '{}'::jsonb,
+  p_school       text default ''
 ) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
   v_name   text := coalesce(p_student_name, '');
   v_grade  text := coalesce(p_grade, '');
+  v_school text := coalesce(trim(p_school), '');
   v_row    requests%rowtype;
   v_no     int;
   v_pos    int;
@@ -180,11 +186,13 @@ begin
 
   -- 名簿の生徒なら名前・学年は名簿から取る
   if p_student_id is not null then
-    select name, grade into v_name, v_grade from students where id = p_student_id;
+    select name, grade, case when v_school = '' then school else v_school end
+      into v_name, v_grade, v_school from students where id = p_student_id;
     if not found then
       raise exception 'NO_STUDENT';
     end if;
   end if;
+  if length(v_school) > 30 then raise exception 'TOO_LONG'; end if;
 
   if length(trim(v_name)) = 0 then raise exception 'NO_NAME'; end if;
   if p_classroom is null or length(p_classroom) = 0 then raise exception 'NO_CLASSROOM'; end if;
@@ -205,7 +213,7 @@ begin
 
   insert into requests (day, receipt_no, student_id, student_name, grade,
                         classroom, seat, kind, subject, content, copies, urgency, device_id,
-                        purpose, amount, difficulty, unit_name, page_range, checks)
+                        purpose, amount, difficulty, unit_name, page_range, checks, school)
   values (jst_today(), v_no, p_student_id, trim(v_name), v_grade,
           p_classroom, coalesce(trim(p_seat),''), p_kind, p_subject,
           coalesce(trim(p_content),''),
@@ -216,7 +224,7 @@ begin
           case when p_kind = 'print' then p_amount else null end,
           case when p_kind = 'print' then p_difficulty else null end,
           coalesce(trim(p_unit_name),''), coalesce(trim(p_page_range),''),
-          coalesce(p_checks, '{}'::jsonb))
+          coalesce(p_checks, '{}'::jsonb), v_school)
   returning * into v_row;
 
   select count(*) into v_pos from requests where status = 'waiting';
@@ -328,7 +336,8 @@ begin
   perform check_pass(p_pass);
   select * into v_s from students where id = p_student_id;
   if not found then raise exception 'NO_STUDENT'; end if;
-  update requests set student_id = v_s.id, student_name = v_s.name, grade = v_s.grade, linked_at = now()
+  update requests set student_id = v_s.id, student_name = v_s.name, grade = v_s.grade, linked_at = now(),
+                      school = case when school = '' then v_s.school else school end
   where id = p_id returning * into v_row;
   if not found then raise exception 'NOT_FOUND'; end if;
   return v_row;
@@ -408,7 +417,7 @@ end $$;
 
 grant usage on schema public to anon, authenticated;
 grant execute on function
-  public.list_students(), public.create_request(text,bigint,text,text,text,text,text,text,text,int,text,text,text,text,text,text,jsonb),
+  public.list_students(), public.create_request(text,bigint,text,text,text,text,text,text,text,int,text,text,text,text,text,text,jsonb,text),
   public.my_requests(text), public.request_by_receipt(int), public.cancel_request(bigint,text),
   public.teacher_login(text), public.teacher_list(text),
   public.teacher_update(text,bigint,text,text,text,text[]),

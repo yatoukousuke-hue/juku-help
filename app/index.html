@@ -82,7 +82,7 @@
   function renderHome() {
     const isPersonal = mode === 'personal';
     app.innerHTML = `${header()}
-      ${isPersonal && profile ? `<div class="card small"><span class="muted">あなた：</span><b>${esc(profile.student_name)}</b>${profile.grade ? `（${esc(profile.grade)}）` : ''}　${esc(profile.classroom || '')}
+      ${isPersonal && profile ? `<div class="card small"><span class="muted">あなた：</span><b>${esc(profile.student_name)}</b>${profile.grade ? `（${esc(profile.grade)}${profile.school ? '・' + esc(profile.school === C.SCHOOL_OTHER && profile.schoolOther ? profile.schoolOther : profile.school) : ''}）` : ''}　${esc(profile.classroom || '')}
         <button class="btn-link small" id="btnEditProfile">変更</button></div>` : ''}
       <button class="btn big block" id="btnPrint" style="margin-bottom:12px">📄 プリントがほしい</button>
       <button class="btn big block" id="btnQuestion" style="margin-bottom:20px">✋ 質問したい</button>
@@ -181,6 +181,7 @@
     const p = (mode === 'personal' && profile) ? profile : {};
     form = {
       kind, student_id: p.student_id ?? null, student_name: p.student_name || '', grade: p.grade || '', other: !!p.other,
+      school: p.school || '', schoolOther: p.schoolOther || '',
       classroom: p.classroom || (C.CLASSROOMS.length === 1 ? C.CLASSROOMS[0] : ''), seat: '',
       subject: '', content: '', urgency: 'later',
       purpose: '', checks: {}, amount: '', difficulty: '', unit_name: '', page_range: '', reason: '',
@@ -248,6 +249,10 @@
           ${f.other ? `<input class="input mt" id="otherName" placeholder="名前を入力" value="${esc(f.student_name)}">` : ''}
         `}
 
+        ${step('中学校')}
+        <div class="chips" id="schoolChips">${chips(C.SCHOOLS.concat([C.SCHOOL_OTHER]), f.school, 'school')}</div>
+        ${f.school === C.SCHOOL_OTHER ? `<input class="input mt" id="schoolOther" maxlength="30" placeholder="学校名（任意）" value="${esc(f.schoolOther)}">` : ''}
+
         ${step('どこ？')}
         <div class="chips" id="roomChips">${chips(C.CLASSROOMS, f.classroom, 'room')}</div>
         ${C.SEAT_ENABLED ? `<div class="row mt"><span>席番号</span><input class="input" id="seatInput" type="${C.SEAT_INPUT === 'number' ? 'number' : 'text'}" inputmode="${C.SEAT_INPUT === 'number' ? 'numeric' : 'text'}" placeholder="例: 12" value="${esc(f.seat)}" style="width:120px"></div>` : ''}
@@ -287,6 +292,7 @@
       if ($('#unitInput')) f.unit_name = $('#unitInput').value;
       if ($('#pageInput')) f.page_range = $('#pageInput').value;
       if ($('#reasonInput')) f.reason = $('#reasonInput').value;
+      if ($('#schoolOther')) f.schoolOther = $('#schoolOther').value;
       if ($('#otherName')) f.student_name = $('#otherName').value;
       if ($('#nameSearch')) f.nameQ = $('#nameSearch').value;
     };
@@ -297,7 +303,7 @@
     if ($('#btnGoThink')) $('#btnGoThink').onclick = () => { form = null; view = 'home'; render(); toast('考えてから、また来てね！'); };
     if ($('#btnChangeWho')) $('#btnChangeWho').onclick = () => { keep(); f.whoDone = false; f.student_id = null; f.student_name = ''; f.other = false; renderForm(); };
     $$('#gradeChips .chip').forEach((b) => b.onclick = () => { keep(); f.pickGrade = b.dataset.grade; f.student_id = null; f.other = false; f.student_name = ''; renderForm(); });
-    const bindNames = () => $$('#nameChips .chip').forEach((b) => b.onclick = () => { keep(); const s = roster.find((x) => x.id === Number(b.dataset.sid)); f.student_id = s.id; f.student_name = s.name; f.grade = s.grade; f.other = false; f.whoDone = true; f.nameQ = ''; renderForm(); });
+    const bindNames = () => $$('#nameChips .chip').forEach((b) => b.onclick = () => { keep(); const s = roster.find((x) => x.id === Number(b.dataset.sid)); f.student_id = s.id; f.student_name = s.name; f.grade = s.grade; f.other = false; f.whoDone = true; f.nameQ = ''; if (s.school) { f.school = C.SCHOOLS.includes(s.school) ? s.school : C.SCHOOL_OTHER; f.schoolOther = C.SCHOOLS.includes(s.school) ? '' : s.school; } renderForm(); });
     bindNames();
     if ($('#nameSearch')) $('#nameSearch').addEventListener('input', (e) => {
       // 入力のたびに名前一覧だけ差し替える（全体を描き直すとキーボードが閉じるため）
@@ -308,6 +314,7 @@
       bindNames();
     });
     if ($('#btnOther')) $('#btnOther').onclick = () => { keep(); f.other = true; f.student_id = null; f.student_name = ''; f.grade = f.pickGrade; renderForm(); $('#otherName').focus(); };
+    $$('#schoolChips .chip').forEach((b) => b.onclick = () => { keep(); f.school = b.dataset.school; renderForm(); });
     $$('#roomChips .chip').forEach((b) => b.onclick = () => { keep(); f.classroom = b.dataset.room; renderForm(); });
     $$('#subjChips .chip').forEach((b) => b.onclick = () => { keep(); f.subject = b.dataset.subj; renderForm(); });
     $$('#purposeChips .chip').forEach((b) => b.onclick = () => { keep(); f.purpose = b.dataset.purpose; renderForm(); });
@@ -324,6 +331,7 @@
     if (f.other) f.student_name = (f.student_name || '').trim();
     if (!isPrint && f.thinking !== true) return toast('まず「シンキングした？」に答えてください', 'error');
     if (!f.student_id && !f.student_name) return toast('名前を選んでください', 'error');
+    if (!f.school) return toast('中学校を選んでください', 'error');
     if (!f.classroom) return toast('教室を選んでください', 'error');
     if (!f.subject) return toast('教科を選んでください', 'error');
     if (isPrint) {
@@ -348,10 +356,11 @@
         classroom: f.classroom, seat: f.seat, kind: f.kind, subject: f.subject, content: f.content.trim(), copies: null, urgency: f.urgency,
         purpose: isPrint ? f.purpose : null, amount: isPrint ? f.amount : null, difficulty: isPrint ? f.difficulty : null,
         unit_name: f.unit_name.trim(), page_range: f.page_range.trim(), checks: isPrint ? checks : { thinking: true },
+        school: f.school === C.SCHOOL_OTHER ? (f.schoolOther.trim() || C.SCHOOL_OTHER) : f.school,
       });
       lastReceipt = r.receipt_no;
       if (mode === 'personal') {
-        profile = { student_id: f.student_id, student_name: r.student_name, grade: f.grade, classroom: f.classroom, other: !f.student_id };
+        profile = { student_id: f.student_id, student_name: r.student_name, grade: f.grade, classroom: f.classroom, other: !f.student_id, school: f.school, schoolOther: f.schoolOther };
         store.set('jh_profile', profile);
       }
       form = { result: r }; view = 'receipt'; render();
@@ -365,7 +374,7 @@
         <div class="muted mt">受付番号</div>
         <div class="big-no">${r.receipt_no}</div>
         <div class="pos">いま <b>${r.position}</b> 番目です</div>
-        <div class="muted small mt">${esc(r.student_name)}さん・${esc(r.classroom)}・${esc(r.subject)} ${KIND_LABEL[r.kind]}</div>
+        <div class="muted small mt">${esc(r.student_name)}さん${r.school ? `（${esc(r.school)}）` : ''}・${esc(r.classroom)}・${esc(r.subject)} ${KIND_LABEL[r.kind]}</div>
         <div class="muted small">${reqDetail(r)}</div>
         ${mode === 'shared' ? '<div class="small mt" style="color:var(--warn);font-weight:700">状態を確認するときは、この受付番号をおぼえておいてください</div>' : ''}
         <button class="btn big block mt" id="btnClose" style="margin-top:24px">${mode === 'shared' ? '終わる（次の人へ）' : 'ホームにもどる'}</button>

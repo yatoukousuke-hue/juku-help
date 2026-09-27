@@ -104,6 +104,7 @@
         p_subject: p.subject, p_content: p.content ?? '', p_copies: p.copies ?? null, p_urgency: p.urgency ?? null,
         p_purpose: p.purpose ?? null, p_amount: p.amount ?? null, p_difficulty: p.difficulty ?? null,
         p_unit_name: p.unit_name ?? '', p_page_range: p.page_range ?? '', p_checks: p.checks ?? {},
+        p_school: p.school ?? '',
       }),
       myRequests: (dev) => call('my_requests', { p_device_id: dev }),
       requestByReceipt: (no) => call('request_by_receipt', { p_receipt_no: no }),
@@ -127,8 +128,8 @@
     const save = (db) => store.set(KEY, db);
     function seed() {
       const db = { pass: 'sensei', seq: 0, sseq: 0, students: [], requests: [] };
-      [['佐藤 花子', '中2', '第一中'], ['鈴木 太郎', '中3', '第二中'], ['高橋 美咲', '中1', '第一中'],
-       ['田中 健', '中2', '第三中'], ['伊藤 さくら', '中3', '第一中'], ['渡辺 大輝', '中1', '第二中']]
+      [['佐藤 花子', '中2', '水谷'], ['鈴木 太郎', '中3', '本郷'], ['高橋 美咲', '中1', '水谷'],
+       ['田中 健', '中2', '水谷'], ['伊藤 さくら', '中3', '富士見東'], ['渡辺 大輝', '中1', '本郷']]
         .forEach(([name, grade, school]) => db.students.push({ id: ++db.sseq, student_no: `${grade}_${name.replace(/[\s　]/g, '')}`, name, grade, school, active: true }));
       save(db); return db;
     }
@@ -136,7 +137,7 @@
     const jstToday = () => { const d = new Date(Date.now() + 9 * 3600e3); return d.toISOString().slice(0, 10); };
     const checkPass = (db, p) => { if (!p || p !== db.pass) throw new Error('BAD_PASS'); };
     const pub = (db, r) => ({
-      id: r.id, receipt_no: r.receipt_no, day: r.day, student_name: r.student_name, classroom: r.classroom, seat: r.seat,
+      id: r.id, receipt_no: r.receipt_no, day: r.day, student_name: r.student_name, school: r.school, classroom: r.classroom, seat: r.seat,
       kind: r.kind, subject: r.subject, content: r.content, copies: r.copies, urgency: r.urgency, status: r.status,
       purpose: r.purpose, amount: r.amount, difficulty: r.difficulty, unit_name: r.unit_name, page_range: r.page_range,
       teacher: r.status === 'in_progress' ? r.teacher : null,
@@ -146,15 +147,15 @@
     const delay = (v) => new Promise((res) => setTimeout(() => res(v), 120));
     return {
       mode: 'local',
-      listStudents: async () => delay(load().students.filter((s) => s.active).map(({ id, student_no, name, grade }) => ({ id, student_no, name, grade }))
+      listStudents: async () => delay(load().students.filter((s) => s.active).map(({ id, student_no, name, grade, school }) => ({ id, student_no, name, grade, school }))
         .sort((a, b) => a.grade.localeCompare(b.grade) || a.student_no.localeCompare(b.student_no))),
       createRequest: async (p) => {
         const db = load();
         const t = Date.now();
         if (db.requests.some((r) => r.device_id === p.device_id && t - new Date(r.created_at).getTime() < 15000)) throw new Error('TOO_FAST');
         if (db.requests.filter((r) => r.device_id === p.device_id && t - new Date(r.created_at).getTime() < 3600e3).length >= 30) throw new Error('TOO_MANY');
-        let name = (p.student_name || '').trim(), grade = p.grade || '', sid = p.student_id ?? null;
-        if (sid != null) { const s = db.students.find((x) => x.id === sid); if (!s) throw new Error('NO_STUDENT'); name = s.name; grade = s.grade; }
+        let name = (p.student_name || '').trim(), grade = p.grade || '', sid = p.student_id ?? null, school = (p.school || '').trim();
+        if (sid != null) { const s = db.students.find((x) => x.id === sid); if (!s) throw new Error('NO_STUDENT'); name = s.name; grade = s.grade; if (!school) school = s.school || ''; }
         if (!name) throw new Error('NO_NAME');
         if (!p.classroom) throw new Error('NO_CLASSROOM');
         if (!['print', 'question'].includes(p.kind)) throw new Error('BAD_KIND');
@@ -169,7 +170,7 @@
           copies: p.kind === 'print' ? (p.copies ?? null) : null, urgency: p.kind === 'question' ? (p.urgency || 'later') : null,
           purpose: p.kind === 'print' ? p.purpose : null, amount: p.kind === 'print' ? (p.amount ?? null) : null,
           difficulty: p.kind === 'print' ? (p.difficulty ?? null) : null,
-          unit_name: (p.unit_name || '').trim(), page_range: (p.page_range || '').trim(), checks: p.checks || {},
+          unit_name: (p.unit_name || '').trim(), page_range: (p.page_range || '').trim(), checks: p.checks || {}, school,
           status: 'waiting', teacher: null, started_at: null, done_at: null, memo: null, memo_tags: [], device_id: p.device_id, linked_at: null,
         };
         db.requests.push(r); save(db);
@@ -190,7 +191,7 @@
         else throw new Error('BAD_ACTION');
         save(db); return delay({ ...r });
       },
-      teacherLinkStudent: async (pass, id, sid) => { const db = load(); checkPass(db, pass); const s = db.students.find((x) => x.id === sid); if (!s) throw new Error('NO_STUDENT'); const r = db.requests.find((x) => x.id === id); if (!r) throw new Error('NOT_FOUND'); r.student_id = s.id; r.student_name = s.name; r.grade = s.grade; r.linked_at = nowIso(); save(db); return delay({ ...r }); },
+      teacherLinkStudent: async (pass, id, sid) => { const db = load(); checkPass(db, pass); const s = db.students.find((x) => x.id === sid); if (!s) throw new Error('NO_STUDENT'); const r = db.requests.find((x) => x.id === id); if (!r) throw new Error('NOT_FOUND'); r.student_id = s.id; r.student_name = s.name; r.grade = s.grade; r.linked_at = nowIso(); if (!r.school) r.school = s.school || ''; save(db); return delay({ ...r }); },
       teacherHistory: async (pass, sid, from, to) => { const db = load(); checkPass(db, pass); return delay(db.requests.filter((r) => r.student_id === sid && r.day >= from && r.day <= to).sort((a, b) => a.created_at.localeCompare(b.created_at)).map((r) => { const s = db.students.find((x) => x.id === r.student_id); return { ...r, student_no: s?.student_no, school: s?.school }; })); },
       teacherExport: async (pass, from, to) => { const db = load(); checkPass(db, pass); return delay(db.requests.filter((r) => r.day >= from && r.day <= to).sort((a, b) => a.created_at.localeCompare(b.created_at)).map((r) => { const s = db.students.find((x) => x.id === r.student_id); return { ...r, student_no: s?.student_no ?? null, school: s?.school ?? null }; })); },
       teacherStudents: async (pass) => { const db = load(); checkPass(db, pass); return delay(db.students.slice().sort((a, b) => (b.active - a.active) || a.grade.localeCompare(b.grade) || a.student_no.localeCompare(b.student_no))); },

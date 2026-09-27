@@ -49,7 +49,7 @@ const imp = await rpc('teacher_import_students', { p_pass: PASS, p_rows: JSON.st
 ok('imported 2', imp[0].imported === 2, JSON.stringify(imp));
 await expectError('bad pass rejected', () => rpc('teacher_import_students', { p_pass: 'x', p_rows: '[]', p_replace: false }), 'BAD_PASS');
 const students = await rpcSet('list_students', {});
-ok('list_students 2 rows w/o school', students.length === 2 && !('school' in students[0]), JSON.stringify(students));
+ok('list_students 2 rows with school', students.length === 2 && students[0].school, JSON.stringify(students));
 const hanako = students.find(s => s.student_no === '1001');
 
 console.log('\n-- 依頼作成');
@@ -61,6 +61,7 @@ const r1 = (await rpc('create_request', {
 }))[0];
 ok('receipt_no 1', r1.receipt_no === 1, JSON.stringify(r1));
 ok('name from roster', r1.student_name === '佐藤 花子');
+ok('school from roster when not given', r1.school === '第一中', JSON.stringify(r1));
 ok('position 1', r1.position === 1);
 ok('no memo leaked', !('memo' in r1) && !('device_id' in r1));
 
@@ -81,8 +82,9 @@ const r2 = (await rpc('create_request', {
   p_classroom: 'B教室', p_seat: '3', p_kind: 'print', p_subject: '英語',
   p_content: '関係代名詞の復習', p_copies: 2, p_urgency: null,
   p_purpose: 'practice', p_amount: 'M', p_difficulty: 'standard', p_unit_name: '関係代名詞', p_page_range: 'p.40-43',
-  p_checks: JSON.stringify({ work: true, test: false, range: true }),
+  p_checks: JSON.stringify({ work: true, test: false, range: true }), p_school: '本郷',
 }))[0];
+ok('school given for non-roster student', r2.school === '本郷');
 ok('receipt_no 2', r2.receipt_no === 2);
 ok('position 2', r2.position === 2);
 ok('copies kept, urgency null for print', r2.copies === 2 && r2.urgency === null);

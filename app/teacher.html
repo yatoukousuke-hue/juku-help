@@ -32,7 +32,7 @@
   let tname = store.get('jh_tname', '');
   let soundOn = store.get('jh_sound', true);
   let tab = 'waiting';           // waiting | in_progress | done | records | settings
-  let filterRoom = '', filterKind = '', filterUrgent = false, filterGrade = '', filterSubject = '', sortMode = 'time';
+  let filterRoom = '', filterKind = '', filterUrgent = false, filterGrade = '', filterSubject = '', filterSchool = '', sortMode = 'time';
   let rows = [];                 // 今日の一覧
   let knownIds = null;           // 新着検知用
   let timer = null;
@@ -195,6 +195,7 @@
       </div>
       <div class="filters">
         <select id="fGrade"><option value="">全学年</option>${C.GRADES.map((g) => `<option ${filterGrade === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select>
+        <select id="fSchool"><option value="">全学校</option>${C.SCHOOLS.concat([C.SCHOOL_OTHER]).map((x) => `<option ${filterSchool === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
         <select id="fSubject"><option value="">全教科</option>${C.SUBJECTS.map((x) => `<option ${filterSubject === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
         <select id="fSort"><option value="time" ${sortMode === 'time' ? 'selected' : ''}>古い順</option><option value="group" ${sortMode === 'group' ? 'selected' : ''}>学年→教科→単元</option></select>
       </div>
@@ -203,6 +204,7 @@
     $('#fRoom').onchange = (e) => { filterRoom = e.target.value; renderList(); };
     $('#fKind').onchange = (e) => { filterKind = e.target.value; renderList(); };
     $('#fGrade').onchange = (e) => { filterGrade = e.target.value; renderList(); };
+    $('#fSchool').onchange = (e) => { filterSchool = e.target.value; renderList(); };
     $('#fSubject').onchange = (e) => { filterSubject = e.target.value; renderList(); };
     $('#fSort').onchange = (e) => { sortMode = e.target.value; renderList(); };
     renderList();
@@ -210,7 +212,8 @@
 
   // 「同じような依頼」の判定: 学年・教科・単元（空白・全角半角の違いは無視）が同じプリント依頼
   const normUnit = (s) => String(s || '').replace(/[\s　]/g, '').replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xFEE0)).toLowerCase();
-  const groupKey = (r) => `${r.grade}|${r.subject}|${normUnit(r.unit_name)}`;
+  const schoolOf = (r) => { if (r.school) return r.school; const st = r.student_id ? students.find((x) => x.id === r.student_id) : null; return (st && st.school) || ''; };
+  const groupKey = (r) => `${r.grade}|${schoolOf(r)}|${r.subject}|${normUnit(r.unit_name)}`;
   // 待ち・対応中のプリント依頼のうち、同じグループの件数
   function similarPrints(r) {
     if (r.kind !== 'print' || !r.unit_name) return [];
@@ -222,7 +225,7 @@
   function sortRows(items) {
     if (sortMode !== 'group') return items;
     return items.slice().sort((a, b) => gradeIdx(a.grade) - gradeIdx(b.grade) || subjIdx(a.subject) - subjIdx(b.subject)
-      || normUnit(a.unit_name).localeCompare(normUnit(b.unit_name), 'ja') || a.created_at.localeCompare(b.created_at));
+      || schoolOf(a).localeCompare(schoolOf(b), 'ja') || normUnit(a.unit_name).localeCompare(normUnit(b.unit_name), 'ja') || a.created_at.localeCompare(b.created_at));
   }
 
   // カード2行目: 種類・教科・目的・単元・ページ・難易度・量・補足
@@ -239,7 +242,8 @@
   function detailTable(r) {
     const rows = [];
     const st = r.student_id ? students.find((x) => x.id === r.student_id) : null;
-    rows.push(['生徒', `${esc(r.student_name)}${r.grade ? `（${esc(r.grade)}）` : ''}${st && st.school ? `　${esc(st.school)}` : ''}${!r.student_id ? '　<span class="unlinked">名簿外</span>' : ''}`]);
+    rows.push(['生徒', `${esc(r.student_name)}${r.grade ? `（${esc(r.grade)}）` : ''}${!r.student_id ? '　<span class="unlinked">名簿外</span>' : ''}`]);
+    rows.push(['中学校', esc(schoolOf(r) || '（未選択）')]);
     rows.push(['教室', esc(r.classroom)]);
     rows.push(['種類・教科', `${KIND_ICON[r.kind]}${KIND_LABEL[r.kind]}　${esc(r.subject)}`]);
     if (r.kind === 'print') {
@@ -288,7 +292,7 @@
     const tags = (r.memo_tags || []).map((t) => `<span class="tag ${t === C.FOLLOW_TAG ? 'follow' : ''}">${esc(t)}</span>`).join('');
     const longWait = ['waiting', 'in_progress'].includes(r.status) && minutesSince(r.created_at) >= (C.URGENT_ALERT_MIN || 5) * 2;
     return `<div class="req ${r.status} ${urgent ? 'urgent' : ''} ${overdue ? 'overdue' : ''} ${isNew ? 'new' : ''} ${longWait ? 'longwait' : ''}" id="req-${r.id}">
-      <div class="l1"><span class="where">${esc(r.classroom)}</span><span class="who">${esc(r.student_name)}${r.grade ? `<span class="muted small">（${esc(r.grade)}）</span>` : ''}${!r.student_id ? ' <span class="unlinked">名簿外</span>' : ''}</span><span class="time">#${r.receipt_no} ${timeTxt}</span></div>
+      <div class="l1"><span class="where">${esc(r.classroom)}</span><span class="who">${esc(r.student_name)}${r.grade || schoolOf(r) ? `<span class="muted small">（${esc(r.grade)}${schoolOf(r) ? '・' + esc(schoolOf(r)) : ''}）</span>` : ''}${!r.student_id ? ' <span class="unlinked">名簿外</span>' : ''}</span><span class="time">#${r.receipt_no} ${timeTxt}</span></div>
       <div class="l2"><span class="kind">${KIND_ICON[r.kind]}${KIND_LABEL[r.kind]}</span>${r.urgency === 'now' ? '<span class="badge now">早めに</span>' : ''}<span class="badge ${r.status}" style="background:transparent;padding:0">${esc(r.subject)}</span><span class="content">${detailHtml(r)}</span></div>
       ${flagsHtml(r)}${simBadge}
       ${isOpen ? detailTable(r) : ''}
@@ -304,6 +308,7 @@
     if (filterRoom) items = items.filter((r) => r.classroom === filterRoom);
     if (filterKind) items = items.filter((r) => r.kind === filterKind);
     if (filterGrade) items = items.filter((r) => r.grade === filterGrade);
+    if (filterSchool) items = items.filter((r) => filterSchool === C.SCHOOL_OTHER ? !C.SCHOOLS.includes(schoolOf(r)) : schoolOf(r) === filterSchool);
     if (filterSubject) items = items.filter((r) => r.subject === filterSubject);
     if (filterUrgent) items = items.filter((r) => r.urgency === 'now');
     items = sortRows(items);
@@ -326,15 +331,15 @@
     const active = filterGrade || filterSubject || filterKind;
     if (!multi.length && !(active && prints.length >= 2)) { bar.innerHTML = ''; return; }
     bar.innerHTML = `<div class="groupbar">
-      ${multi.map((g) => `<button class="groupchip" data-gkey="${esc(groupKey(g[0]))}" data-grade="${esc(g[0].grade)}" data-subject="${esc(g[0].subject)}">🔁 ${esc(g[0].grade)} ${esc(g[0].subject)}「${esc(g[0].unit_name)}」<b>${g.length}人</b></button>`).join('')}
+      ${multi.map((g) => `<button class="groupchip" data-gkey="${esc(groupKey(g[0]))}" data-grade="${esc(g[0].grade)}" data-subject="${esc(g[0].subject)}" data-school="${esc(schoolOf(g[0]))}">🔁 ${esc(g[0].grade)}${schoolOf(g[0]) ? '・' + esc(schoolOf(g[0])) : ''} ${esc(g[0].subject)}「${esc(g[0].unit_name)}」<b>${g.length}人</b></button>`).join('')}
       ${prints.length >= 2 ? `<button class="btn xs" id="btnMultiSlip">📄 表示中のプリント${prints.length}件をまとめて指示書</button>` : ''}
     </div>`;
-    $$('.groupchip', bar).forEach((b) => b.onclick = () => { filterKind = 'print'; filterGrade = b.dataset.grade; filterSubject = b.dataset.subject; sortMode = 'group'; renderBody(); });
+    $$('.groupchip', bar).forEach((b) => b.onclick = () => { filterKind = 'print'; filterGrade = b.dataset.grade; filterSubject = b.dataset.subject; const sc = b.dataset.school; filterSchool = !sc ? '' : (C.SCHOOLS.includes(sc) ? sc : C.SCHOOL_OTHER); sortMode = 'group'; renderBody(); });
     if ($('#btnMultiSlip')) $('#btnMultiSlip').onclick = () => openMultiSlipModal(prints);
   }
   function openMultiSlipModal(list) {
     const head = `【プリント依頼まとめ】${new Date().toLocaleDateString('ja-JP')}　${list.length}件\n` +
-      list.map((r) => `・${r.grade} ${r.student_name}：${r.subject}「${r.unit_name || '-'}」${r.page_range ? ' ' + r.page_range : ''}　${PURPOSE_LABEL[r.purpose] || ''}／${DIFF_LABEL[r.difficulty] || ''}・${AMOUNT_LABEL[r.amount] || ''}`).join('\n');
+      list.map((r) => `・${r.grade}${schoolOf(r) ? '・' + schoolOf(r) : ''} ${r.student_name}：${r.subject}「${r.unit_name || '-'}」${r.page_range ? ' ' + r.page_range : ''}　${PURPOSE_LABEL[r.purpose] || ''}／${DIFF_LABEL[r.difficulty] || ''}・${AMOUNT_LABEL[r.amount] || ''}`).join('\n');
     const text = head + '\n\n' + list.map((r) => buildSlip(r)).join('\n\n----------------\n\n');
     const bg = modal(`<h3 class="noprint">まとめて指示書（${list.length}件）</h3>
       <div class="small muted noprint">同じ単元の依頼は1枚のプリントで済むことがあります。上の一覧で確認してから、コピーか印刷してください。</div>
@@ -353,7 +358,7 @@
     const r = rows.find((x) => x.id === id); if (!r) return;
     if (act === 'detail') { if (expanded.has(id)) expanded.delete(id); else expanded.add(id); return renderList(); }
     if (act === 'slip') return openSlipModal(r);
-    if (act === 'group') { filterKind = 'print'; filterGrade = r.grade; filterSubject = r.subject; sortMode = 'group'; return renderBody(); }
+    if (act === 'group') { filterKind = 'print'; filterGrade = r.grade; filterSubject = r.subject; const sc = schoolOf(r); filterSchool = !sc ? '' : (C.SCHOOLS.includes(sc) ? sc : C.SCHOOL_OTHER); sortMode = 'group'; return renderBody(); }
     if (act === 'start') return doUpdate(id, 'start', tname, null, null);
     if (act === 'reopen') return doUpdate(id, 'reopen', null, null, null);
     if (act === 'cancel') {
@@ -405,7 +410,7 @@
     const d = new Date(r.created_at);
     const vars = {
       date: `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${fmtTime(r.created_at)}`,
-      grade: r.grade || '', name: r.student_name, school: (st && st.school) || '学校名なし', subject: r.subject,
+      grade: r.grade || '', name: r.student_name, school: schoolOf(r) || '学校名なし', subject: r.subject,
       purpose: PURPOSE_LABEL[r.purpose] || r.purpose || '', unit: r.unit_name || '（未記入）', range: r.page_range || '（未記入）',
       difficulty: DIFF_LABEL[r.difficulty] || '標準', amount: AMOUNT_LABEL[r.amount] || 'ふつう',
       content: r.content || 'なし', checks, reason: c.reason ? `（それでも必要な理由: ${c.reason}）` : '', teacher: r.teacher || tname,
@@ -571,7 +576,7 @@
       const head = ['日付', '受付番号', '依頼時刻', '対応開始', '完了時刻', '状態', '生徒名', '学年', '学校', '教室', '種類', '教科', '目的', '単元', '範囲ページ', '難易度', '量', '事前チェック', '補足', '急ぎ度', '担当講師', '定型メモ', 'メモ'];
       const fmtT = (iso) => iso ? `${new Date(iso).getFullYear()}/${new Date(iso).getMonth() + 1}/${new Date(iso).getDate()} ${fmtTime(iso)}` : '';
       const checksTxt = (r) => { const um = unmetChecks(r); const reason = r.checks && r.checks.reason; if (r.kind !== 'print') return ''; if (!um.length && !reason) return (r.purpose && (C.PRINT_PURPOSES.find((x) => x.key === r.purpose) || {}).needsCheck) ? 'すべて済' : ''; return um.map((t) => t + '未').join('／') + (reason ? `（理由: ${reason}）` : ''); };
-      const body = data.map((r) => [r.day, r.receipt_no, fmtT(r.created_at), fmtT(r.started_at), fmtT(r.done_at), STATUS_LABEL[r.status], r.student_name, r.grade, r.school, r.classroom, KIND_LABEL[r.kind], r.subject, PURPOSE_LABEL[r.purpose] || '', r.unit_name, r.page_range, DIFF_LABEL[r.difficulty] || '', AMOUNT_LABEL[r.amount] || '', checksTxt(r), r.content, r.urgency ? URGENCY_LABEL[r.urgency] : '', r.teacher, (r.memo_tags || []).join('／'), r.memo].map(csvEscape).join(','));
+      const body = data.map((r) => [r.day, r.receipt_no, fmtT(r.created_at), fmtT(r.started_at), fmtT(r.done_at), STATUS_LABEL[r.status], r.student_name, r.grade, schoolOf(r), r.classroom, KIND_LABEL[r.kind], r.subject, PURPOSE_LABEL[r.purpose] || '', r.unit_name, r.page_range, DIFF_LABEL[r.difficulty] || '', AMOUNT_LABEL[r.amount] || '', checksTxt(r), r.content, r.urgency ? URGENCY_LABEL[r.urgency] : '', r.teacher, (r.memo_tags || []).join('／'), r.memo].map(csvEscape).join(','));
       const csv = '﻿' + [head.join(','), ...body].join('\r\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `依頼履歴_${from}_${to}.csv`; document.body.appendChild(a); a.click(); a.remove();

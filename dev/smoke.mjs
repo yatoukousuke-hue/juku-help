@@ -112,12 +112,41 @@ s.setVal('#pageInput', 'Unit 4 p.40 問2');
 s.click('送信する'); await sleep(400);
 ok('質問が送れた', s.text().includes('受け付けました') && s.text().includes('関係代名詞'), s.text().slice(0, 300));
 
+// 3件目: 同じ単元（中2 数学 一次関数）のプリントを別の生徒から
+storage.setItem('jh_device_id', 'd-third-device-xxxx');
+s = load('index.html'); await sleep(300);
+s.click('📄 プリントがほしい'); await sleep(50);
+s.click('変更'); await sleep(30); s.click('中2'); await sleep(30); s.click('佐藤 花子', s.$('#nameChips')); await sleep(30);
+s.click('2階中教室'); s.click('数学'); await sleep(30);
+s.click('苦手だからポイント確認から'); await sleep(30);
+ok('ポイント確認は事前チェックなし', !s.$('#checkRows'));
+ok('手順番号が順番どおり', /1\s*だれ？[\s\S]*2\s*どこ？[\s\S]*3\s*教科[\s\S]*4\s*プリントの目的[\s\S]*5\s*単元・範囲/.test(s.text()), s.text().slice(0, 300));
+s.setVal('#unitInput', '一次関数 '); s.setVal('#pageInput', 'p.30〜33');
+s.click('基礎'); s.click('少なめ'); await sleep(30);
+s.click('送信する'); await sleep(400);
+ok('3件目が送れた', s.text().includes('受け付けました'), s.text().slice(0, 200));
+
 console.log('--- 講師画面');
 storage.removeItem('jh_tpass');
 let t = load('teacher.html'); await sleep(300);
 ok('ログイン画面', t.text().includes('合言葉'));
 t.setVal('#pass', 'sensei'); t.setVal('#tname', '山田'); t.click('入る'); await sleep(600);
-ok('一覧に2件', t.w.document.querySelectorAll('.req').length === 2, t.text().slice(0, 300));
+ok('一覧に3件', t.w.document.querySelectorAll('.req').length === 3, t.text().slice(0, 300));
+ok('学年・教科・並び順のフィルタがある', t.$('#fGrade') && t.$('#fSubject') && t.$('#fSort'));
+ok('同じ単元バッジ（田中と佐藤の一次関数）', t.$('#req-1').textContent.includes('同じ単元 あと1人') && t.$('#req-3').textContent.includes('同じ単元 あと1人'));
+ok('まとめバーにグループ', t.$('#groupBar').textContent.includes('中2 数学「一次関数」') && t.$('#groupBar').textContent.includes('2人'));
+// グループチップで絞り込み → プリントだけ・学年→教科→単元順
+t.$('#groupBar .groupchip').click(); await sleep(100);
+ok('絞り込みで2件（質問は除外）', t.w.document.querySelectorAll('.req').length === 2 && t.$('#fGrade').value === '中2' && t.$('#fSubject').value === '数学' && t.$('#fSort').value === 'group');
+t.click('📄 表示中のプリント2件をまとめて指示書'); await sleep(100);
+const ms = t.$('#slipText');
+ok('まとめて指示書に2人分', ms && ms.textContent.includes('2件') && ms.textContent.includes('田中 健') && ms.textContent.includes('佐藤 花子') && ms.textContent.split('----------------').length === 2, ms && ms.textContent.slice(0, 300));
+t.click('閉じる', t.$('.modal')); await sleep(50);
+// フィルタ解除
+t.$('#fGrade').value = ''; t.$('#fGrade').dispatchEvent(new t.w.Event('change'));
+t.$('#fSubject').value = ''; t.$('#fSubject').dispatchEvent(new t.w.Event('change'));
+t.$('#fKind').value = ''; t.$('#fKind').dispatchEvent(new t.w.Event('change')); await sleep(50);
+ok('解除で3件に戻る', t.w.document.querySelectorAll('.req').length === 3);
 const card1 = t.$('#req-1');
 ok('カードに目的・単元・難易度・量', card1.textContent.includes('類題演習用') && card1.textContent.includes('一次関数') && card1.textContent.includes('標準・ふつう'));
 ok('未実施フラグと理由', card1.textContent.includes('テスト形式未') && card1.textContent.includes('理由: 明日テスト'));
@@ -142,10 +171,13 @@ ok('接続表示', t.$('#conn').textContent.includes('更新'));
 t.$('#tileUrgent').click(); await sleep(100);
 ok('緊急だけに絞られる', t.w.document.querySelectorAll('.req').length === 1 && t.$('#req-2'));
 t.$('#tileUrgent').click(); await sleep(100);
-ok('絞り込み解除', t.w.document.querySelectorAll('.req').length === 2);
+ok('絞り込み解除', t.w.document.querySelectorAll('.req').length === 3);
 // 対応する → 完了（メモ）
 t.click('対応する', t.$('#req-1')); await sleep(500);
 ok('対応中へ', !t.$('#req-1'));
+t.click('対応中'); await sleep(100);
+ok('対応中でも受付からの経過時間', t.$('#req-1') && /受付から \d+分（対応 \d+分）/.test(t.$('#req-1').textContent), t.$('#req-1') && t.$('#req-1').querySelector('.time').textContent);
+t.click('待ち'); await sleep(100);
 // 生徒側（1件目を送った端末）に「先生が向かっています」
 storage.setItem('jh_device_id', 'd-first-device-xxxx');
 const s1 = load('index.html'); await sleep(400);
@@ -177,7 +209,7 @@ ok('完了タブにメモ', t.$('#req-1') && t.$('#req-1').textContent.includes(
 // 2段階の取消
 t.click('待ち'); await sleep(100);
 t.click('取消', t.$('#req-2')); await sleep(50);
-ok('取消は2段階', t.$('#req-2') && t.$('#req-2').textContent.includes('本当に取消'));
+ok('取消は2段階', t.$('#req-2') && t.$('#req-2').textContent.includes('本当に取消'), (t.$('#req-2') || {textContent: 'no card: ' + t.$('#list').textContent.slice(0, 200)}).textContent);
 // 記録
 t.click('記録'); await sleep(400);
 const sel = t.$('#rSid'); sel.value = Array.from(sel.options).find((o) => o.textContent.includes('田中')).value;

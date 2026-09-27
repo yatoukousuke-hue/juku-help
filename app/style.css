@@ -219,3 +219,13 @@ pre.slip { font-size: 1rem; line-height: 1.6; }
   .modal-bg.print-target .modal { max-height: none; box-shadow: none; border-radius: 0; padding: 0; max-width: none; }
   pre.slip { background: none; padding: 0; font-size: 12pt; }
 }
+
+/* 同じ単元の依頼のまとめ表示 */
+.simbadge { display: inline-block; margin-top: 6px; background: var(--primary-soft); color: var(--primary-dark); border-radius: 999px; padding: 3px 10px; font-size: .8rem; font-weight: 700; }
+.groupbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
+.groupchip { background: var(--card); border: 2px solid var(--primary); color: var(--primary-dark); border-radius: 999px; padding: 5px 12px; font-size: .85rem; font-weight: 700; box-shadow: var(--shadow); }
+.groupchip b { margin-left: 4px; }
+
+/* 受付から長く経っている依頼（待ち・対応中とも）は時間を赤く */
+.req.longwait .l1 .time { color: var(--danger); }
+.req .l1 .time .sub { color: var(--muted); font-weight: 400; font-size: .75rem; }

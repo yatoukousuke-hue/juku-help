@@ -36,6 +36,7 @@
   let myList = [];
   let pollTimer = null;
   let lastReceipt = null;
+  let armedCancel = { id: null, until: 0 };   // 「取り消す」を1回押した状態（自動更新をまたいでも保持）
 
   JH.demoBanner();
 
@@ -122,7 +123,7 @@
         ${r.urgency === 'now' ? '<span class="badge now">早めに</span>' : ''}<span class="spacer"></span><span class="badge ${st}">${STATUS_LABEL[st]}</span></div>
       <div class="line2">${reqDetail(r)}</div>
       <div class="line2">${ahead}　・　送信 ${fmtTime(r.created_at)}（${elapsedText(r.created_at)}前）</div>
-      ${allowCancel && st === 'waiting' ? `<div><button class="btn danger sm" data-cancel="${r.id}">取り消す</button></div>` : ''}
+      ${allowCancel && st === 'waiting' ? `<div><button class="btn danger sm" data-cancel="${r.id}">${armedCancel.id === r.id && Date.now() < armedCancel.until ? '本当に取り消す（もう一度押す）' : '取り消す'}</button></div>` : ''}
     </div>`;
   }
   async function refreshMyList() {
@@ -137,7 +138,13 @@
   // 取り消しは2段階（ボタン → 「本当に取り消す」）。confirm ダイアログは使わない
   function bindCancel(root) {
     $$('[data-cancel]', root).forEach((b) => b.onclick = async () => {
-      if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = '本当に取り消す（もう一度押す）'; setTimeout(() => { if (b.isConnected) { b.dataset.armed = ''; b.textContent = '取り消す'; } }, 4000); return; }
+      const id = Number(b.dataset.cancel);
+      if (!(armedCancel.id === id && Date.now() < armedCancel.until)) {
+        armedCancel = { id, until: Date.now() + 4000 }; b.textContent = '本当に取り消す（もう一度押す）';
+        setTimeout(() => { if (armedCancel.id === id && Date.now() >= armedCancel.until) { armedCancel = { id: null, until: 0 }; if (b.isConnected) b.textContent = '取り消す'; } }, 4100);
+        return;
+      }
+      armedCancel = { id: null, until: 0 };
       b.disabled = true;
       try { await api.cancelRequest(Number(b.dataset.cancel), DEV); toast('取り消しました'); if (mode === 'personal') refreshMyList(); else lookupReceipt(); }
       catch (e) { toast(errorText(e), 'error'); b.disabled = false; }
@@ -205,7 +212,7 @@
     let n = 0; const step = (title) => `<div class="step"><span class="num">${++n}</span>${title}</div>`;
 
     // 質問: 最初に「シンキングした？」
-    const thinkingBlock = !isPrint ? `
+    const thinkingBlock = () => !isPrint ? `
         ${step(T.question)}
         <div class="chips" id="thinkChips">
           <button class="chip wide ${f.thinking === true ? 'selected' : ''}" data-think="1">✅ ${esc(T.yes)}</button>
@@ -214,13 +221,13 @@
         ${f.thinking === false ? `<div class="nudge">${esc(T.nudge)}<div class="mt"><button class="btn block" id="btnGoThink">考えてくる（ホームへ）</button></div></div>` : ''}` : '';
     const questionLocked = !isPrint && f.thinking !== true;
 
-    const purposeBlock = isPrint ? `
+    const purposeBlock = () => isPrint ? `
         ${step('プリントの目的')}
         <div class="chips" id="purposeChips">${C.PRINT_PURPOSES.map((p) => `<button class="chip wide ${f.purpose === p.key ? 'selected' : ''}" data-purpose="${esc(p.key)}">${esc(p.label)}</button>`).join('')}</div>` : '';
 
     const needCheck = isPrint && !!(C.PRINT_PURPOSES.find((x) => x.key === f.purpose) || {}).needsCheck;
     const um = isPrint ? unmet(f) : [];
-    const checkBlock = needCheck ? `
+    const checkBlock = () => needCheck ? `
         ${step('その前に確認')}
         <div id="checkRows">${C.PRINT_CHECKS.map((c) => `<div class="checkrow"><span class="q">${esc(c.label)}</span>
             <button class="chip ${f.checks[c.key] === true ? 'selected' : ''}" data-check="${esc(c.key)}" data-val="1">やった</button>
@@ -230,7 +237,7 @@
 
     app.innerHTML = `<div class="topbar"><button class="btn ghost sm" id="btnBack">← もどる</button><h1>${KIND_ICON[f.kind]} ${isPrint ? 'プリントがほしい' : '質問したい'}</h1><span></span></div>
       <div class="card">
-        ${thinkingBlock}
+        ${thinkingBlock()}
         <div id="restOfForm" class="${questionLocked ? 'hidden' : ''}">
         ${step('だれ？')}
         ${f.whoDone ? `<div class="row"><b>${esc(f.student_name)}</b>${f.grade ? `（${esc(f.grade)}）` : ''}<button class="btn-link small" id="btnChangeWho">変更</button></div>` : `
@@ -248,8 +255,8 @@
         ${step('教科')}
         <div class="chips" id="subjChips">${chips(C.SUBJECTS, f.subject, 'subj')}</div>
 
-        ${purposeBlock}
-        ${checkBlock}
+        ${purposeBlock()}
+        ${checkBlock()}
 
         ${step(isPrint ? '単元・範囲' : '質問の内容')}
         <label class="lbl" style="margin-top:0">単元名${isPrint ? '（必須）' : ''}</label>

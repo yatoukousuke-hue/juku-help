@@ -44,6 +44,8 @@
   const expanded = new Set();     // 「詳細」を開いているカードの id
   let armed = { id: null, until: 0 };  // 「取消」を1回押した状態（自動更新をまたいでも4秒間保持）
   let scoresAll = [];             // 点数（講師だけ）
+  let doneDay = todayYmd();       // 完了タブで見る日付
+  let doneRows = null;            // 過去日の完了一覧（読み込み結果）
   let recentPrints = [];          // 直近のプリント依頼
   let ctxTimer = null;
   const firstOfMonth = (d) => ymd(new Date(d.getFullYear(), d.getMonth(), 1));
@@ -167,7 +169,8 @@
       const overdue = rows.some((r) => r.status === 'waiting' && r.urgency === 'now' && minutesSince(r.created_at) >= (C.URGENT_ALERT_MIN || 5));
       if (overdue && Date.now() - lastOverdueBeep > 60000) { lastOverdueBeep = Date.now(); beep(1); }
       renderSummary();
-      if (['waiting', 'in_progress', 'done'].includes(tab)) renderList(newOnes.map((r) => r.id));
+      if (['waiting', 'in_progress'].includes(tab)) renderList(newOnes.map((r) => r.id));
+      if (tab === 'done' && doneDay === todayYmd()) { doneRows = rows.filter((r) => r.status === 'done' || r.status === 'cancelled'); drawDone(); }
     } catch (e) {
       if (String(e.message).includes('BAD_PASS')) { clearInterval(timer); store.del('jh_tpass'); pass = ''; return renderLogin('合言葉が変わったようです。もう一度入ってください。'); }
       connErr = true; setConn();
@@ -195,6 +198,7 @@
     const body = $('#body');
     if (tab === 'records') return renderRecords(body);
     if (tab === 'settings') return renderSettings(body);
+    if (tab === 'done') return renderDone(body);
     body.innerHTML = `<div class="filters">
         <select id="fRoom"><option value="">全教室</option>${C.CLASSROOMS.map((c) => `<option ${filterRoom === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
         <select id="fKind"><option value="">種類：全部</option><option value="question" ${filterKind === 'question' ? 'selected' : ''}>質問</option><option value="print" ${filterKind === 'print' ? 'selected' : ''}>プリント</option></select>
@@ -232,6 +236,49 @@
     if (sortMode !== 'group') return items;
     return items.slice().sort((a, b) => gradeIdx(a.grade) - gradeIdx(b.grade) || subjIdx(a.subject) - subjIdx(b.subject)
       || schoolOf(a).localeCompare(schoolOf(b), 'ja') || normUnit(a.unit_name).localeCompare(normUnit(b.unit_name), 'ja') || a.created_at.localeCompare(b.created_at));
+  }
+
+  // 完了タブ: 日付を選んで、その日に「いつ・誰に・何を」渡したかを一覧で
+  async function renderDone(body) {
+    body.innerHTML = `<div class="row" style="margin-bottom:10px">
+        <button class="btn xs ghost" id="dPrev">◀ 前日</button>
+        <input class="input" type="date" id="dDay" value="${doneDay}" style="flex:1;max-width:190px">
+        <button class="btn xs ghost" id="dNext">翌日 ▶</button>
+        <button class="btn xs ghost" id="dToday">今日</button>
+      </div>
+      <div class="filters"><select id="dKind"><option value="">種類：全部</option><option value="print" ${filterKind === 'print' ? 'selected' : ''}>プリント</option><option value="question" ${filterKind === 'question' ? 'selected' : ''}>質問</option></select>
+        <select id="dGrade"><option value="">全学年</option>${C.GRADES.map((g) => `<option ${filterGrade === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select></div>
+      <div id="doneList"><div class="muted small">読み込み中…</div></div>`;
+    const shift = (n) => { const d = new Date(doneDay + 'T00:00:00'); d.setDate(d.getDate() + n); doneDay = ymd(d); doneRows = null; renderDone(body); };
+    $('#dPrev').onclick = () => shift(-1);
+    $('#dNext').onclick = () => shift(1);
+    $('#dToday').onclick = () => { doneDay = todayYmd(); doneRows = null; renderDone(body); };
+    $('#dDay').onchange = (e) => { if (e.target.value) { doneDay = e.target.value; doneRows = null; renderDone(body); } };
+    $('#dKind').onchange = (e) => { filterKind = e.target.value; drawDone(); };
+    $('#dGrade').onchange = (e) => { filterGrade = e.target.value; drawDone(); };
+    try {
+      if (doneDay === todayYmd()) doneRows = rows.filter((r) => r.status === 'done' || r.status === 'cancelled');
+      else if (!doneRows) doneRows = (await api.teacherExport(pass, doneDay, doneDay)).filter((r) => r.status === 'done' || r.status === 'cancelled');
+      drawDone();
+    } catch (e) { $('#doneList').innerHTML = `<div class="small" style="color:var(--danger)">${esc(errorText(e))}</div>`; }
+  }
+  function drawDone() {
+    const box = $('#doneList'); if (!box) return;
+    let items = (doneRows || []).slice();
+    if (filterKind) items = items.filter((r) => r.kind === filterKind);
+    if (filterGrade) items = items.filter((r) => r.grade === filterGrade);
+    items.sort((a, b) => String(b.done_at || b.created_at).localeCompare(String(a.done_at || a.created_at)));
+    const done = items.filter((r) => r.status === 'done');
+    const byTeacher = {}; done.forEach((r) => { const k = r.teacher || '（担当なし）'; byTeacher[k] = (byTeacher[k] || 0) + 1; });
+    box.innerHTML = `<div class="card small" style="padding:10px 14px">${doneDay === todayYmd() ? '今日' : esc(doneDay)}：完了 <b>${done.length}</b> 件（プリント ${done.filter((r) => r.kind === 'print').length}・質問 ${done.filter((r) => r.kind === 'question').length}）${Object.keys(byTeacher).length ? '　担当：' + Object.entries(byTeacher).map(([k, v]) => `${esc(k)} ${v}`).join('・') : ''}${items.length - done.length ? `　<span class="muted">取消 ${items.length - done.length}</span>` : ''}</div>`
+      + (items.length ? `<div class="handover">${items.map((r) => `<div class="ho ${r.status}" data-id="${r.id}">
+          <span class="t">${fmtTime(r.done_at || r.created_at)}</span>
+          <span class="w"><b>${esc(r.student_name)}</b><span class="sub">（${esc(r.grade)}${schoolOf(r) ? '・' + esc(schoolOf(r)) : ''}）</span></span>
+          <span class="x">${KIND_ICON[r.kind]}<b>${esc(r.subject)}</b> ${esc(r.unit_name || '')}${r.page_range ? ' <span class="sub">' + esc(r.page_range) + '</span>' : ''}${r.kind === 'print' ? `<span class="sub"> ${esc([PURPOSE_LABEL[r.purpose], DIFF_LABEL[r.difficulty], AMOUNT_LABEL[r.amount]].filter(Boolean).join('・'))}</span>` : ''}</span>
+          <span class="m">${r.status === 'cancelled' ? '<span class="badge cancelled">取消</span>' : ''}${r.teacher ? `<span class="tag">${esc(r.teacher)}</span>` : ''}${(r.memo_tags || []).map((t) => `<span class="tag ${t === C.FOLLOW_TAG ? 'follow' : ''}">${esc(t)}</span>`).join('')}${r.memo ? `<span class="sub">${esc(r.memo)}</span>` : ''}</span>
+          ${doneDay === todayYmd() ? `<span class="b"><button class="btn xs ghost" data-act="done" data-id="${r.id}">メモ</button><button class="btn xs ghost" data-act="reopen" data-id="${r.id}">戻す</button></span>` : ''}
+        </div>`).join('')}</div>` : '<div class="empty">この日の完了はありません</div>');
+    $$('[data-act]', box).forEach((b) => b.onclick = () => onAction(b.dataset.act, Number(b.dataset.id), b));
   }
 
   // カード2行目: 種類・教科・目的・単元・ページ・難易度・量・補足
@@ -287,6 +334,23 @@
     if (!um.length && !reason) return '';
     return `<div class="flags">${um.map((t) => `<span class="flag">${esc(t)}未</span>`).join('')}${reason ? `<span class="sub">理由: ${esc(reason)}</span>` : ''}</div>`;
   }
+  // 初期表示用の小さなしるし（詳細を開くと全部見える）
+  function miniFlags(r) {
+    const um = unmetChecks(r);
+    return um.length ? `<span class="flag" title="${esc(um.join('・'))}未">⚠ 確認まだ${um.length}</span>` : '';
+  }
+  // 初期表示用の1行版（点数→レベル・テキスト・前回）。注意があるときだけ赤
+  function assistCompact(r) {
+    if (r.kind !== 'print') return '';
+    const li = levelInfo(r); const rt = recommendTexts(r, li.rec); const ps = priorSummary(r);
+    const parts = [];
+    if (li.cur || li.target != null) parts.push(`📈 ${li.cur ? li.cur.value + '点' : ''}${li.target != null ? '/目標' + li.target : ''}${li.rec ? '→' + LEVEL_JA[li.rec] : ''}`);
+    if (rt.picked.length) parts.push(`📚 ${esc(rt.picked[0].name)}${rt.picked.length > 1 ? ' ほか' : ''}`);
+    if (ps.last) parts.push(`📄 ${ps.today ? '今日' + (ps.today + 1) + '枚目' : '前回' + fmtDate(ps.last.created_at)}${ps.ask ? '（さっきのやった？）' : ''}`);
+    if (!parts.length) return '';
+    const warn = li.warns.length || ps.ask;
+    return `<div class="assist mini ${warn ? 'warn' : ''}">${parts.join('　')}${li.warns.length ? '　⚠' : ''}</div>`;
+  }
   function cardHtml(r, isNew) {
     const urgent = r.kind === 'question' && r.urgency === 'now' && r.status === 'waiting';
     const overdue = urgent && minutesSince(r.created_at) >= (C.URGENT_ALERT_MIN || 5);
@@ -309,9 +373,10 @@
     const longWait = ['waiting', 'in_progress'].includes(r.status) && minutesSince(r.created_at) >= (C.URGENT_ALERT_MIN || 5) * 2;
     return `<div class="req ${r.status} ${urgent ? 'urgent' : ''} ${overdue ? 'overdue' : ''} ${isNew ? 'new' : ''} ${longWait ? 'longwait' : ''}" id="req-${r.id}">
       <div class="l1"><span class="where">${esc(r.classroom)}</span><span class="who">${esc(r.student_name)}${r.grade || schoolOf(r) ? `<span class="muted small">（${esc(r.grade)}${schoolOf(r) ? '・' + esc(schoolOf(r)) : ''}）</span>` : ''}${!r.student_id ? ' <span class="unlinked">名簿外</span>' : ''}</span><span class="time">#${r.receipt_no} ${timeTxt}</span></div>
-      <div class="l2"><span class="kind">${KIND_ICON[r.kind]}${KIND_LABEL[r.kind]}</span>${r.urgency === 'now' ? '<span class="badge now">早めに</span>' : ''}<span class="badge ${r.status}" style="background:transparent;padding:0">${esc(r.subject)}</span><span class="content">${detailHtml(r)}</span></div>
-      ${flagsHtml(r)}${simBadge}
-      ${assistHtml(r)}
+      <div class="l2 big"><span class="subj">${esc(r.subject)}</span><span class="unit">${esc(r.unit_name || '（単元なし）')}</span><span class="range">${esc(r.page_range || '')}</span></div>
+      <div class="l2 tags"><span class="kind">${KIND_ICON[r.kind]}${KIND_LABEL[r.kind]}</span>${r.urgency === 'now' ? '<span class="badge now">早めに</span>' : ''}${r.kind === 'print' ? `<span class="tag">${esc(PURPOSE_LABEL[r.purpose] || '')}</span><span class="tag">${esc([DIFF_LABEL[r.difficulty], AMOUNT_LABEL[r.amount]].filter(Boolean).join('・'))}</span>` : ''}${miniFlags(r)}${simBadge}${r.content && !isOpen ? '<span class="sub">＋補足あり</span>' : ''}</div>
+      ${isOpen ? flagsHtml(r) : assistCompact(r)}
+      ${isOpen ? assistHtml(r) : ''}
       ${isOpen ? detailTable(r) : ''}
       ${(r.memo || tags) ? `<div class="memo">${tags}${esc(r.memo || '')}</div>` : ''}
       <div class="l3"><span class="meta">${fmtTime(r.created_at)} 受付${r.teacher ? `・担当 ${esc(r.teacher)}` : ''}</span>${detailBtn}${slipBtn}${linkBtn}${cancelBtn}${btns}</div>
@@ -335,7 +400,7 @@
       : `<div class="empty">${tab === 'waiting' ? '待っている依頼はありません 🎉' : tab === 'in_progress' ? '対応中の依頼はありません' : '今日の完了はまだありません'}</div>`;
     $$('[data-act]', list).forEach((b) => b.onclick = () => onAction(b.dataset.act, Number(b.dataset.id), b));
     // 2行目（内容）をタップしても詳細を開閉できる
-    $$('.req .l2', list).forEach((el) => { el.style.cursor = 'pointer'; el.onclick = () => { const id = Number(el.closest('.req').id.replace('req-', '')); if (expanded.has(id)) expanded.delete(id); else expanded.add(id); renderList(); }; });
+    $$('.req .l2, .req .assist.mini', list).forEach((el) => { el.style.cursor = 'pointer'; el.onclick = (ev) => { if (ev.target.closest('button')) return; const id = Number(el.closest('.req').id.replace('req-', '')); if (expanded.has(id)) expanded.delete(id); else expanded.add(id); renderList(); }; });
   }
 
   // 表示中のプリント依頼を 学年・教科・単元 でまとめた一覧（2件以上のグループだけ）
@@ -389,7 +454,7 @@
     if (act === 'link') return openLinkModal(r);
   }
   async function doUpdate(id, action, teacher, memo, tags) {
-    try { await api.teacherUpdate(pass, id, action, teacher, memo, tags); await refresh(true); }
+    try { await api.teacherUpdate(pass, id, action, teacher, memo, tags); await refresh(true); if (tab === 'done') { doneRows = null; renderBody(); } }
     catch (e) { toast(errorText(e), 'error'); }
   }
 
@@ -474,7 +539,7 @@
     try {
       const [st, sc, rp] = await Promise.all([api.teacherStudents(pass), api.teacherScoresAll(pass), api.teacherRecentPrints(pass, C.RECENT_PRINT_DAYS || 14)]);
       students = st; scoresAll = sc; recentPrints = rp;
-      if (['waiting', 'in_progress', 'done'].includes(tab)) renderList();
+      if (['waiting', 'in_progress'].includes(tab)) renderList();
     } catch (_) {}
   }
   const LEVEL_JA = { basic: '基礎', standard: '標準', advanced: '応用' };
@@ -574,8 +639,10 @@
     const s = recState;
     body.innerHTML = `<div class="card">
         <h2>生徒別の記録</h2>
-        <label class="lbl">生徒</label>
-        <select class="input" id="rSid"><option value="">選んでください</option>${students.map((x) => `<option value="${x.id}" ${String(s.sid) === String(x.id) ? 'selected' : ''}>${esc(x.grade)} ${esc(x.name)}${x.school ? `（${esc(x.school)}）` : ''}${x.active ? '' : '（無効）'}</option>`).join('')}</select>
+        <label class="lbl">生徒（名前で検索）</label>
+        <input class="input" id="rSearch" placeholder="名前の一部を入力（例: 田中）" value="${esc(s.q || '')}">
+        <div class="chips names mt" id="rHits"></div>
+        <select class="input mt" id="rSid"><option value="">選んでください</option>${students.map((x) => `<option value="${x.id}" ${String(s.sid) === String(x.id) ? 'selected' : ''}>${esc(x.grade)} ${esc(x.name)}${x.school ? `（${esc(x.school)}）` : ''}${x.active ? '' : '（無効）'}</option>`).join('')}</select>
         <div class="row mt"><input class="input" type="date" id="rFrom" value="${s.from}" style="flex:1"><span>〜</span><input class="input" type="date" id="rTo" value="${s.to}" style="flex:1"></div>
         <div class="row mt"><button class="btn xs ghost" id="rThisMonth">今月</button><button class="btn xs ghost" id="rLastMonth">先月</button><button class="btn xs ghost" id="r3Months">直近3か月</button></div>
         <div class="row mt">
@@ -588,6 +655,18 @@
     $('#rThisMonth').onclick = () => setRange(firstOfMonth(new Date()), todayYmd());
     $('#rLastMonth').onclick = () => { const d = new Date(); d.setMonth(d.getMonth() - 1); setRange(firstOfMonth(d), lastOfMonth(d)); };
     $('#r3Months').onclick = () => { const d = new Date(); d.setMonth(d.getMonth() - 2); setRange(firstOfMonth(d), todayYmd()); };
+    const normQ = (x) => String(x || '').replace(/[\s　]/g, '');
+    const drawHits = () => {
+      const q = normQ($('#rSearch').value); s.q = $('#rSearch').value;
+      const hits = q ? students.filter((x) => normQ(x.name).includes(q)).slice(0, 12) : [];
+      $('#rHits').innerHTML = hits.map((x) => `<button class="chip ${String(s.sid) === String(x.id) ? 'selected' : ''}" data-rsid="${x.id}">${esc(x.name)}<span class="muted small">（${esc(x.grade)}${x.school ? '・' + esc(x.school) : ''}）</span></button>`).join('') + (q && !hits.length ? '<div class="muted small">見つかりません</div>' : '');
+      $$('[data-rsid]').forEach((b) => b.onclick = () => { $('#rSid').value = b.dataset.rsid; s.sid = b.dataset.rsid; drawHits(); showHistory(); });
+      if (hits.length === 1 && String(s.sid) !== String(hits[0].id)) { $('#rSid').value = hits[0].id; }
+    };
+    $('#rSearch').addEventListener('input', drawHits);
+    $('#rSearch').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if ($('#rSid').value) showHistory(); } });
+    $('#rSid').onchange = () => { s.sid = $('#rSid').value; };
+    drawHits();
     $('#rShow').onclick = showHistory;
     $('#rCsv').onclick = exportCsv;
     if (s.sid && s.hist) drawHistory();
@@ -718,8 +797,10 @@
       </div>
       <div class="card">
         <h2>名簿（${students.filter((s) => s.active).length}人）</h2>
-        <table class="tbl"><tr><th>学年</th><th>氏名</th><th>学校</th><th></th></tr>
-        ${students.map((s) => `<tr><td>${esc(s.grade)}</td><td>${esc(s.name)}</td><td>${esc(s.school)}</td><td>${s.active ? '' : '<span class="muted">無効</span>'}</td></tr>`).join('')}</table>
+        <p class="small muted">退塾した生徒は「無効にする」を押すと、生徒画面の名前一覧から消えます（記録は残り、「戻す」でいつでも復活）。まとめて入れ替えたいときは上の取り込みで「無い生徒を無効にする」にチェック。</p>
+        <input class="input" id="rosterFilter" placeholder="名前で絞り込み">
+        <table class="tbl mt" id="rosterTable"><tr><th>学年</th><th>氏名</th><th>学校</th><th></th></tr>
+        ${students.map((s) => `<tr data-name="${esc(s.name)}" class="${s.active ? '' : 'inactive'}"><td>${esc(s.grade)}</td><td>${esc(s.name)}</td><td>${esc(s.school)}</td><td>${s.active ? `<button class="btn xs ghost" data-deact="${s.id}">無効にする</button>` : `<span class="muted">無効</span> <button class="btn xs soft" data-react="${s.id}">戻す</button>`}</td></tr>`).join('')}</table>
       </div>
       <div class="card">
         <h2>定期テストの点数の取り込み（講師だけが見られます）</h2>
@@ -753,6 +834,14 @@
         .filter((c) => !/^(氏名|名前|生徒名|name)/i.test(c[0]))
         .map((c) => ({ student_no: `${grade}_${c[0].replace(/[\s　]/g, '')}`, name: c[0], grade, school: c[1] || '' }));
     };
+    $('#rosterFilter').addEventListener('input', (e) => { const q = e.target.value.replace(/[\s　]/g, ''); $$('#rosterTable tr[data-name]').forEach((tr) => { tr.style.display = !q || tr.dataset.name.replace(/[\s　]/g, '').includes(q) ? '' : 'none'; }); });
+    $$('[data-deact]').forEach((b) => b.onclick = async () => {
+      if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = '本当に無効にする'; b.classList.add('danger'); setTimeout(() => { if (b.isConnected) { b.dataset.armed = ''; b.textContent = '無効にする'; b.classList.remove('danger'); } }, 4000); return; }
+      try { await api.teacherSetStudentActive(pass, Number(b.dataset.deact), false); toast('無効にしました', 'ok'); students = []; renderSettings(body); } catch (e) { toast(errorText(e), 'error'); }
+    });
+    $$('[data-react]').forEach((b) => b.onclick = async () => {
+      try { await api.teacherSetStudentActive(pass, Number(b.dataset.react), true); toast('戻しました', 'ok'); students = []; renderSettings(body); } catch (e) { toast(errorText(e), 'error'); }
+    });
     $('#rosterText').addEventListener('input', () => { const rs = parseRoster(); $('#rosterPreview').textContent = rs.length ? `${rs.length}人を読み取りました` : ''; });
     $('#rosterImport').onclick = async () => {
       const rs = parseRoster(); if (!rs.length) return toast('読み取れる行がありません', 'error');

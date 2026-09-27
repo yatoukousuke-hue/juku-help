@@ -484,6 +484,18 @@ begin
     order by r.created_at desc;
 end $$;
 
+-- 生徒を無効にする／戻す（退塾など。記録は残る）
+create or replace function public.teacher_set_student_active(p_pass text, p_student_id bigint, p_active boolean)
+returns public.students
+language plpgsql security definer set search_path = public as $$
+declare v_s students%rowtype;
+begin
+  perform check_pass(p_pass);
+  update students set active = coalesce(p_active, true), updated_at = now() where id = p_student_id returning * into v_s;
+  if not found then raise exception 'NO_STUDENT'; end if;
+  return v_s;
+end $$;
+
 -- 合言葉の変更
 create or replace function public.teacher_set_pass(p_pass text, p_new text) returns boolean
 language plpgsql security definer set search_path = public as $$
@@ -507,6 +519,7 @@ grant execute on function
   public.teacher_students(text), public.teacher_import_students(text,jsonb,boolean),
   public.teacher_import_scores(text,jsonb), public.teacher_scores_all(text),
   public.teacher_set_targets(text,bigint,jsonb), public.teacher_recent_prints(text,int),
+  public.teacher_set_student_active(text,bigint,boolean),
   public.teacher_set_pass(text,text)
 to anon, authenticated;
 

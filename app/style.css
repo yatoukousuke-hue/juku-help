@@ -240,3 +240,25 @@ pre.slip { font-size: 1rem; line-height: 1.6; }
 .targets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
 .targets label { font-size: .85rem; font-weight: 700; }
 .targets input { margin-top: 2px; padding: 8px 10px; }
+
+/* カードの初期表示: 科目と範囲を大きく */
+.req .l2.big { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.req .l2.big .subj { font-size: 1.05rem; font-weight: 900; color: var(--primary-dark); background: var(--primary-soft); border-radius: 8px; padding: 2px 8px; }
+.req .l2.big .unit { font-size: 1.15rem; font-weight: 800; }
+.req .l2.big .range { font-size: 1rem; color: var(--muted); font-weight: 600; }
+.req .l2.tags { margin-top: 4px; flex-wrap: wrap; gap: 4px; font-size: .8rem; }
+.req .l2.tags .tag { background: var(--line); border-radius: 6px; padding: 1px 6px; }
+.req .l2.tags .simbadge { margin-top: 0; }
+.assist.mini { padding: 4px 10px; font-size: .8rem; color: var(--muted); }
+.assist.mini.warn { color: var(--danger); font-weight: 700; }
+/* 完了タブの一覧 */
+.handover .ho { display: grid; grid-template-columns: 3.2em 1fr; gap: 2px 8px; background: var(--card); border-radius: 12px; box-shadow: var(--shadow); padding: 8px 12px; margin-bottom: 6px; border-left: 5px solid var(--ok); }
+.handover .ho.cancelled { border-left-color: var(--line); opacity: .65; }
+.handover .ho .t { font-weight: 800; color: var(--muted); grid-row: span 3; }
+.handover .ho .w { font-size: 1rem; }
+.handover .ho .x { font-size: 1rem; }
+.handover .ho .m { font-size: .8rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.handover .ho .m .tag { background: var(--line); border-radius: 6px; padding: 0 6px; }
+.handover .ho .m .tag.follow { background: var(--danger-soft); color: var(--danger); }
+.handover .ho .b { grid-column: 2; display: flex; gap: 6px; margin-top: 2px; }
+table.tbl tr.inactive td { color: var(--muted); }

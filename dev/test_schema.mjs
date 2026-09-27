@@ -187,6 +187,12 @@ await db.exec('set role anon');
 await expectError('anon cannot read student_scores', () => db.query('select * from student_scores'), 'permission denied');
 await db.exec('reset role');
 
+const off = (await rpcSet('teacher_set_student_active', { p_pass: PASS, p_student_id: hanako.id, p_active: false }))[0];
+ok('student deactivated', off.active === false);
+ok('inactive student hidden from students list', !(await rpcSet('list_students', {})).some((x) => x.id === hanako.id));
+const on = (await rpcSet('teacher_set_student_active', { p_pass: PASS, p_student_id: hanako.id, p_active: true }))[0];
+ok('student reactivated', on.active === true);
+
 console.log('\n-- 合言葉変更');
 await expectError('too short', () => rpc('teacher_set_pass', { p_pass: PASS, p_new: '12' }), 'PASS_TOO_SHORT');
 await rpc('teacher_set_pass', { p_pass: PASS, p_new: 'newpass' });

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ja"><head><meta charset="utf-8"><title>seed</title></head>
+<body>
+<script src="config.js"></script>
+<script src="materials.js"></script>
+<script src="common.js"></script>
+<script>
+// スクリーンショット用のデモデータを localStorage（お試しモード）に入れる
+(async () => {
+  const api = JH.api;
+  localStorage.clear();
+  localStorage.setItem('jh_mode', JSON.stringify('personal'));
+  localStorage.setItem('jh_tpass', JSON.stringify('sensei'));
+  localStorage.setItem('jh_tname', JSON.stringify('山田'));
+  localStorage.setItem('jh_sound', JSON.stringify(false));
+  const st = await api.teacherStudents('sensei');
+  const by = (n) => st.find((x) => x.name === n);
+  await api.teacherImportScores('sensei', [
+    { student_no: by('田中 健').student_no, period: '2026.1', label: '2026年度 1学期中間', grade_at: 2, scores: { 英語: 70, 数学: 42, 国語: 60, 理科: 55, 社会: 50 }, rank: 30, total: 277 },
+    { student_no: by('田中 健').student_no, period: '2025.5', label: '2025年度 学年末', grade_at: 1, scores: { 数学: 48, 英語: 66 }, rank: 33, total: 290 },
+    { student_no: by('佐藤 花子').student_no, period: '2026.1', label: '2026年度 1学期中間', grade_at: 2, scores: { 数学: 92, 英語: 88 }, rank: 2, total: 460 },
+    { student_no: by('高橋 美咲').student_no, period: '2026.1', label: '2026年度 1学期中間', grade_at: 1, scores: { 英語: 58 }, rank: 20, total: 300 },
+  ]);
+  await api.teacherSetTargets('sensei', by('佐藤 花子').id, { 数学: 95, '5科': 470 });
+  await api.teacherSetTargets('sensei', by('田中 健').id, { 数学: 70 });
+  const mk = (dev, p) => api.createRequest({ device_id: dev, classroom: '3階大教室', seat: '', copies: null, content: '', ...p });
+  const r1 = await mk('d-001', { student_id: by('田中 健').id, kind: 'print', subject: '数学', purpose: 'practice', amount: 'M', difficulty: 'standard', unit_name: '一次関数', page_range: 'ワーク p.32〜35', checks: { work: true, test: false, range: true, reason: '明日テストで時間がない' }, content: 'さっきの小テストの解き直しもしたい' });
+  const r2 = await mk('d-002', { student_id: by('高橋 美咲').id, kind: 'question', subject: '英語', classroom: '個別部屋', urgency: 'now', unit_name: '関係代名詞', page_range: 'Unit 4 p.40 問2', checks: { thinking: true } });
+  const r3 = await mk('d-003', { student_id: by('佐藤 花子').id, kind: 'print', subject: '数学', classroom: '2階中教室', purpose: 'point', amount: 'S', difficulty: 'basic', unit_name: '一次関数', page_range: 'p.30〜33', checks: {} });
+  const r4 = await mk('d-004', { student_id: by('渡辺 大輝').id, kind: 'print', subject: '理科', purpose: 'test', amount: 'L', difficulty: 'standard', unit_name: '光の性質', page_range: 'p.12〜20', checks: { work: true, test: true, range: true } });
+  const r5 = await mk('d-005', { student_id: by('鈴木 太郎').id, kind: 'question', subject: '社会', urgency: 'later', unit_name: '明治維新', page_range: 'p.88 問3', checks: { thinking: true } });
+  const r6 = await mk('d-006', { student_id: by('伊藤 さくら').id, kind: 'print', subject: '英語', purpose: 'weak', amount: 'M', difficulty: 'standard', unit_name: '不定詞', page_range: 'Unit 3', checks: { work: false, test: false, range: true, reason: '' } });
+  // 田中: 1枚目を完了にして、2枚目を新しく
+  await api.teacherUpdate('sensei', r1.id, 'done', '山田', '変域でつまずき。類題を渡した', ['要フォロー', '類題を渡した']);
+  const r7 = await mk('d-007', { student_id: by('田中 健').id, kind: 'print', subject: '数学', purpose: 'point', amount: 'S', difficulty: 'basic', unit_name: '一次関数', page_range: 'p.36', checks: {} });
+  await api.teacherUpdate('sensei', r4.id, 'start', '田中', null, null);
+  await api.teacherUpdate('sensei', r5.id, 'done', '田中', '', ['理解できた']);
+  // 受付時刻をずらして経過時間を出す
+  const db = JSON.parse(localStorage.getItem('jh_local_db_v1'));
+  const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
+  db.requests.forEach((r, i) => { r.created_at = ago([25, 12, 9, 30, 40, 6, 3][i] || 5); if (r.started_at) r.started_at = ago(4); if (r.done_at) r.done_at = ago(2); });
+  localStorage.setItem('jh_local_db_v1', JSON.stringify(db));
+  document.body.textContent = 'seeded ' + db.requests.length;
+})();
+</script>
+</body></html>

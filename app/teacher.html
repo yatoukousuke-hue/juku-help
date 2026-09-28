@@ -32,7 +32,8 @@
   let pass = store.get('jh_tpass', '');
   let tname = store.get('jh_tname', '');
   let soundOn = store.get('jh_sound', true);
-  let tab = 'waiting';           // waiting | in_progress | done | records | settings
+  const qs = new URLSearchParams(location.search);
+  let tab = ['waiting', 'in_progress', 'done', 'records', 'settings'].includes(qs.get('tab')) ? qs.get('tab') : 'waiting';
   let filterRoom = '', filterKind = '', filterUrgent = false, filterGrade = '', filterSubject = '', filterSchool = '', sortMode = 'time';
   let rows = [];                 // 今日の一覧
   let knownIds = null;           // 新着検知用
@@ -45,6 +46,7 @@
   let armed = { id: null, until: 0 };  // 「取消」を1回押した状態（自動更新をまたいでも4秒間保持）
   let scoresAll = [];             // 点数（講師だけ）
   let doneDay = todayYmd();       // 完了タブで見る日付
+  let filtersOpen = false;        // 絞り込みを開いているか
   let doneRows = null;            // 過去日の完了一覧（読み込み結果）
   let recentPrints = [];          // 直近のプリント依頼
   let ctxTimer = null;
@@ -158,6 +160,7 @@
       const list = await api.teacherList(pass);
       const newOnes = [];
       if (knownIds) list.forEach((r) => { if (r.status === 'waiting' && !knownIds.has(r.id)) newOnes.push(r); });
+      if (!knownIds && qs.get('open') === '1') list.filter((r) => r.status === 'waiting').slice(0, 1).forEach((r) => expanded.add(r.id));
       knownIds = new Set(list.map((r) => r.id));
       rows = list; lastOk = new Date().toISOString(); connErr = false; setConn();
       if (newOnes.length) {
@@ -199,11 +202,14 @@
     if (tab === 'records') return renderRecords(body);
     if (tab === 'settings') return renderSettings(body);
     if (tab === 'done') return renderDone(body);
-    body.innerHTML = `<div class="filters">
+    const active = [filterRoom, filterKind === 'print' ? 'プリント' : filterKind === 'question' ? '質問' : '', filterGrade, filterSchool, filterSubject, sortMode === 'group' ? '学年→教科→単元' : ''].filter(Boolean);
+    const open = filtersOpen || active.length > 0;
+    body.innerHTML = `<div class="filterbar"><button class="btn xs ${active.length ? 'soft' : 'ghost'}" id="fToggle">🔍 絞り込み${active.length ? '：' + active.map(esc).join('・') : ''} ${open ? '▲' : '▼'}</button>${active.length ? '<button class="btn xs ghost" id="fClear">解除</button>' : ''}</div>
+      <div class="filters ${open ? '' : 'hidden'}">
         <select id="fRoom"><option value="">全教室</option>${C.CLASSROOMS.map((c) => `<option ${filterRoom === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
         <select id="fKind"><option value="">種類：全部</option><option value="question" ${filterKind === 'question' ? 'selected' : ''}>質問</option><option value="print" ${filterKind === 'print' ? 'selected' : ''}>プリント</option></select>
       </div>
-      <div class="filters">
+      <div class="filters ${open ? '' : 'hidden'}">
         <select id="fGrade"><option value="">全学年</option>${C.GRADES.map((g) => `<option ${filterGrade === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select>
         <select id="fSchool"><option value="">全学校</option>${C.SCHOOLS.concat([C.SCHOOL_OTHER]).map((x) => `<option ${filterSchool === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
         <select id="fSubject"><option value="">全教科</option>${C.SUBJECTS.map((x) => `<option ${filterSubject === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
@@ -211,6 +217,8 @@
       </div>
       ${filterUrgent ? '<div class="small" style="color:var(--danger);margin:-4px 0 8px">🔴 「早めに来てほしい」だけ表示中（上のタイルで解除）</div>' : ''}
       <div id="groupBar"></div><div id="list"></div>`;
+    $('#fToggle').onclick = () => { filtersOpen = !open; renderBody(); };
+    if ($('#fClear')) $('#fClear').onclick = () => { filterRoom = filterKind = filterGrade = filterSchool = filterSubject = ''; sortMode = 'time'; filterUrgent = false; filtersOpen = false; renderBody(); renderSummary(); };
     $('#fRoom').onchange = (e) => { filterRoom = e.target.value; renderList(); };
     $('#fKind').onchange = (e) => { filterKind = e.target.value; renderList(); };
     $('#fGrade').onchange = (e) => { filterGrade = e.target.value; renderList(); };
@@ -242,9 +250,9 @@
   async function renderDone(body) {
     body.innerHTML = `<div class="row" style="margin-bottom:10px">
         <button class="btn xs ghost" id="dPrev">◀ 前日</button>
-        <input class="input" type="date" id="dDay" value="${doneDay}" style="flex:1;max-width:190px">
+        <input class="input" type="date" id="dDay" value="${doneDay}" style="flex:1;min-width:0;padding:8px 6px;font-size:.95rem">
         <button class="btn xs ghost" id="dNext">翌日 ▶</button>
-        <button class="btn xs ghost" id="dToday">今日</button>
+        <button class="btn xs soft" id="dToday">今日</button>
       </div>
       <div class="filters"><select id="dKind"><option value="">種類：全部</option><option value="print" ${filterKind === 'print' ? 'selected' : ''}>プリント</option><option value="question" ${filterKind === 'question' ? 'selected' : ''}>質問</option></select>
         <select id="dGrade"><option value="">全学年</option>${C.GRADES.map((g) => `<option ${filterGrade === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select></div>
@@ -357,6 +365,11 @@
     const timeTxt = r.status === 'waiting' ? `受付から ${elapsedText(r.created_at)}`
       : r.status === 'in_progress' ? `受付から ${elapsedText(r.created_at)}<span class="sub">（対応 ${elapsedText(r.started_at || r.created_at)}）</span>`
       : r.status === 'done' ? `完了 ${fmtTime(r.done_at)}` : `取消 ${fmtTime(r.done_at)}`;
+    const primary = r.status === 'waiting' ? `<button class="btn" data-act="start" data-id="${r.id}">対応する</button><button class="btn ok" data-act="done" data-id="${r.id}">完了</button>`
+      : r.status === 'in_progress' ? `<button class="btn ok" data-act="done" data-id="${r.id}">完了にする</button>` : '';
+    const secondary = r.status === 'in_progress' ? `<button class="btn xs ghost" data-act="reopen" data-id="${r.id}">待ちに戻す</button>`
+      : r.status === 'done' ? `<button class="btn xs ghost" data-act="done" data-id="${r.id}">メモを直す</button><button class="btn xs ghost" data-act="reopen" data-id="${r.id}">待ちに戻す</button>`
+      : r.status === 'cancelled' ? `<button class="btn xs ghost" data-act="reopen" data-id="${r.id}">待ちに戻す</button>` : '';
     const btns = r.status === 'waiting' ? `<button class="btn sm" data-act="start" data-id="${r.id}">対応する</button><button class="btn sm ok" data-act="done" data-id="${r.id}">完了</button>`
       : r.status === 'in_progress' ? `<button class="btn sm ok" data-act="done" data-id="${r.id}">完了にする</button><button class="btn xs ghost" data-act="reopen" data-id="${r.id}">待ちに戻す</button>`
       : r.status === 'done' ? `<button class="btn xs ghost" data-act="done" data-id="${r.id}">メモを直す</button><button class="btn xs ghost" data-act="reopen" data-id="${r.id}">待ちに戻す</button>`
@@ -372,14 +385,15 @@
     const tags = (r.memo_tags || []).map((t) => `<span class="tag ${t === C.FOLLOW_TAG ? 'follow' : ''}">${esc(t)}</span>`).join('');
     const longWait = ['waiting', 'in_progress'].includes(r.status) && minutesSince(r.created_at) >= (C.URGENT_ALERT_MIN || 5) * 2;
     return `<div class="req ${r.status} ${urgent ? 'urgent' : ''} ${overdue ? 'overdue' : ''} ${isNew ? 'new' : ''} ${longWait ? 'longwait' : ''}" id="req-${r.id}">
-      <div class="l1"><span class="where">${esc(r.classroom)}</span><span class="who">${esc(r.student_name)}${r.grade || schoolOf(r) ? `<span class="muted small">（${esc(r.grade)}${schoolOf(r) ? '・' + esc(schoolOf(r)) : ''}）</span>` : ''}${!r.student_id ? ' <span class="unlinked">名簿外</span>' : ''}</span><span class="time">#${r.receipt_no} ${timeTxt}</span></div>
+      <div class="l1"><span class="who">${esc(r.student_name)}${r.grade || schoolOf(r) ? `<span class="muted small">（${esc(r.grade)}${schoolOf(r) ? '・' + esc(schoolOf(r)) : ''}）</span>` : ''}${!r.student_id ? ' <span class="unlinked">名簿外</span>' : ''}</span><span class="time">${timeTxt}</span></div>
       <div class="l2 big"><span class="subj">${esc(r.subject)}</span><span class="unit">${esc(r.unit_name || '（単元なし）')}</span><span class="range">${esc(r.page_range || '')}</span></div>
-      <div class="l2 tags"><span class="kind">${KIND_ICON[r.kind]}${KIND_LABEL[r.kind]}</span>${r.urgency === 'now' ? '<span class="badge now">早めに</span>' : ''}${r.kind === 'print' ? `<span class="tag">${esc(PURPOSE_LABEL[r.purpose] || '')}</span><span class="tag">${esc([DIFF_LABEL[r.difficulty], AMOUNT_LABEL[r.amount]].filter(Boolean).join('・'))}</span>` : ''}${miniFlags(r)}${simBadge}${r.content && !isOpen ? '<span class="sub">＋補足あり</span>' : ''}</div>
+      <div class="l2 tags"><span class="where">${esc(r.classroom)}</span><span class="kind">${KIND_ICON[r.kind]}${KIND_LABEL[r.kind]}</span>${r.urgency === 'now' ? '<span class="badge now">早めに</span>' : ''}${r.kind === 'print' ? `<span class="tag">${esc(PURPOSE_LABEL[r.purpose] || '')}</span><span class="tag">${esc([DIFF_LABEL[r.difficulty], AMOUNT_LABEL[r.amount]].filter(Boolean).join('・'))}</span>` : ''}${miniFlags(r)}${simBadge}${r.content && !isOpen ? '<span class="sub">＋補足あり</span>' : ''}</div>
       ${isOpen ? flagsHtml(r) : assistCompact(r)}
       ${isOpen ? assistHtml(r) : ''}
       ${isOpen ? detailTable(r) : ''}
       ${(r.memo || tags) ? `<div class="memo">${tags}${esc(r.memo || '')}</div>` : ''}
-      <div class="l3"><span class="meta">${fmtTime(r.created_at)} 受付${r.teacher ? `・担当 ${esc(r.teacher)}` : ''}</span>${detailBtn}${slipBtn}${linkBtn}${cancelBtn}${btns}</div>
+      <div class="l3"><span class="meta">#${r.receipt_no}　${fmtTime(r.created_at)} 受付${r.teacher ? `・担当 ${esc(r.teacher)}` : ''}</span>${detailBtn}${slipBtn}${linkBtn}${cancelBtn}${secondary}</div>
+      ${primary ? `<div class="actions">${primary}</div>` : ''}
     </div>`;
   }
 

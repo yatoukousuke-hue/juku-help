@@ -410,6 +410,7 @@
   // ---- 開始 ----
   render();
   loadRoster();
+  { const f0 = new URLSearchParams(location.search).get('form'); if (mode && (f0 === 'print' || f0 === 'question')) setTimeout(() => startForm(f0), 400); }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && view === 'home') render(); });
 })();
 </script>

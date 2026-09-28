@@ -8,3 +8,5 @@ app/.vercel/
 dev/scores.xlsx
 dev/scores_import.json
 dev/kyozai.txt
+dev/preview/
+dev/shots/

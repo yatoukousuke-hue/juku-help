@@ -2,11 +2,32 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "rewrites": [
-    { "source": "/sensei", "destination": "/teacher" },
-    { "source": "/kyoushi", "destination": "/teacher" },
-    { "source": "/qr", "destination": "/qr" }
+    {
+      "source": "/sensei",
+      "destination": "/teacher"
+    },
+    {
+      "source": "/kyoushi",
+      "destination": "/teacher"
+    },
+    {
+      "source": "/qr",
+      "destination": "/qr"
+    }
   ],
   "headers": [
-    { "source": "/(.*)", "headers": [ { "key": "Cache-Control", "value": "no-cache" } ] }
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors 'self' https://manabi-operations.vercel.app http://localhost:3000"
+        }
+      ]
+    }
   ]
 }

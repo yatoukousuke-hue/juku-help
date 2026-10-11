@@ -86,6 +86,9 @@ window.APP_CONFIG = {
   // 集計で「要フォロー件数」として数える定型文
   FOLLOW_TAG: "要フォロー",
 
+  // --- 講師画面を埋め込んでよいサイト（水谷教室運営アプリ）。ここに無いサイトからの合言葉は受け取らない ---
+  EMBED_PARENT_ORIGINS: ["https://manabi-operations.vercel.app"],
+
   // --- 自動更新の間隔（秒） ---
   REFRESH_SEC_TEACHER: 5,
   REFRESH_SEC_STUDENT: 10,

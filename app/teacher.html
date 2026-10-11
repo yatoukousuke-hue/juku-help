@@ -33,6 +33,10 @@
   let tname = store.get('jh_tname', '');
   let soundOn = store.get('jh_sound', true);
   const qs = new URLSearchParams(location.search);
+  // 埋め込みモード（水谷教室運営アプリの中で開く）: 親から合言葉と先生名を postMessage で受け取る
+  const EMBED = qs.get('embed') === '1';
+  const EMBED_PARENTS = (C.EMBED_PARENT_ORIGINS || []).concat(['http://localhost:3000']);
+  if (EMBED) document.documentElement.classList.add('embed');
   let tab = ['waiting', 'in_progress', 'done', 'records', 'settings'].includes(qs.get('tab')) ? qs.get('tab') : 'waiting';
   let filterRoom = '', filterKind = '', filterUrgent = false, filterGrade = '', filterSubject = '', filterSchool = '', sortMode = 'time';
   let rows = [];                 // 今日の一覧
@@ -62,6 +66,7 @@
     app.innerHTML = `<div class="login-wrap">
       <div class="card">
         <h2>講師画面</h2>
+        ${EMBED ? '<div class="small muted">運営アプリから自動で入ります。入らないときは合言葉と名前を入れてください。</div>' : ''}
         ${msg ? `<div class="small" style="color:var(--danger)">${esc(msg)}</div>` : ''}
         <label class="lbl">合言葉</label>
         <input class="input" id="pass" type="password" autocomplete="current-password" value="${esc(pass)}">
@@ -900,9 +905,23 @@
     $('#btnLogout').onclick = () => { store.del('jh_tpass'); pass = ''; clearInterval(timer); renderLogin(); };
   }
 
+  // 埋め込み時: 親アプリから {type:'jh-login', pass, name} を受け取ったらその場で入る（許可した親だけ）
+  window.addEventListener('message', async (ev) => {
+    if (!EMBED || !EMBED_PARENTS.includes(ev.origin)) return;
+    const d = ev.data || {};
+    if (d.type !== 'jh-login' || !d.pass) return;
+    const newName = String(d.name || '').trim() || tname || '先生';
+    if (pass === d.pass && tname === newName && rows.length) return;   // すでに同じ内容で入っている
+    try {
+      await api.teacherLogin(d.pass);
+      pass = d.pass; tname = newName; store.set('jh_tpass', pass); store.set('jh_tname', tname);
+      renderMain();
+    } catch (e) { renderLogin(errorText(e)); }
+  });
+
   // ---------- 開始 ----------
   if (pass) { api.teacherLogin(pass).then(renderMain).catch((e) => renderLogin(errorText(e))); }
-  else renderLogin();
+  else renderLogin(EMBED ? '' : undefined);
 })();
 </script>
 </body>

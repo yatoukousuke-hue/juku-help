@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 // 1回目と2回目（あれば）の一覧を合わせる（同じファイルは1つに）
 const src = [];
 const seen = new Set();
-for (const f of ['dev/drive_materials.json', 'dev/drive_materials_pass2.json']) {
+for (const f of ['dev/drive_materials.json', 'dev/drive_materials_pass2.json', 'dev/drive_materials_pass3.json']) {
   if (!existsSync(f)) continue;
   for (const x of JSON.parse(readFileSync(f, 'utf8'))) { if (!x.id || seen.has(x.id)) continue; seen.add(x.id); src.push(x); }
 }
@@ -53,7 +53,7 @@ function detectCategories(path, title) {
   const t = path + ' ' + title;
   const c = new Set();
   if (/北辰/.test(t)) c.add('test');
-  if (/講習|合宿|講義|板書|QRノート|授業プリント|通常授業/.test(t)) { c.add('intro'); c.add('practice'); }
+  if (/講習|合宿|講義|板書|ノート|授業プリント|通常授業|テキスト/.test(t)) { c.add('intro'); c.add('practice'); }
   if (/ベーシック|基礎編|準備講座|はじめて/.test(t)) c.add('intro');
   if (/補強プリント|弱点補強|補強テキスト|大問一|計算の達人/.test(t)) c.add('weak');
   if (/検定テスト|学年末検定|メモリーツリー/.test(t)) c.add('test');

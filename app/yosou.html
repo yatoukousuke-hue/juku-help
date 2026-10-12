@@ -18,25 +18,29 @@
 
   /* ---- A4 の紙（北辰テストに近い見た目） ---- */
   .paper-wrap { overflow-x: auto; padding: 4px 0 24px; }
-  .paper { width: 210mm; min-height: 297mm; margin: 0 auto 16px; background: #fff; color: #111; box-shadow: 0 2px 14px rgba(0,0,0,.15);
-    padding: 12mm 13mm; box-sizing: border-box; font-family: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", "Noto Serif JP", serif; font-size: 10.5pt; line-height: 1.6; position: relative; }
+  .paper { width: 210mm; height: 297mm; overflow: hidden; margin: 0 auto 16px; background: #fff; color: #111; box-shadow: 0 2px 14px rgba(0,0,0,.15);
+    padding: 12mm 13mm; box-sizing: border-box; font-family: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", "Noto Serif JP", serif; font-size: 10pt; line-height: 1.5; position: relative; }
+  .fitnote { width: 210mm; max-width: 100%; margin: 0 auto 8px; }
   .paper .head { display: flex; align-items: flex-end; justify-content: space-between; border-bottom: 2.5px solid #111; padding-bottom: 2mm; margin-bottom: 4mm; }
   .paper .head .ttl { font-family: "Yu Gothic", "Hiragino Sans", sans-serif; font-weight: 900; font-size: 15pt; letter-spacing: .04em; }
   .paper .head .sub { font-size: 9pt; }
-  .paper .name { display: flex; gap: 6mm; font-size: 9.5pt; margin-bottom: 4mm; }
-  .paper .name span { border-bottom: 1px solid #111; min-width: 14mm; display: inline-block; }
-  .paper .name .nm { min-width: 55mm; }
-  .daimon { margin-bottom: 4.5mm; break-inside: avoid; }
+  .paper .name { display: flex; align-items: flex-end; gap: 2mm; font-size: 9.5pt; margin-bottom: 3mm; white-space: nowrap; }
+  .paper .name .b { display: inline-block; border-bottom: 1px solid #111; min-width: 9mm; height: 5mm; }
+  .paper .name .nm { min-width: 62mm; }
+  .paper .name .sp { flex: 1; }
+  .paper .qs { column-count: 2; column-gap: 7mm; column-rule: 1px solid #bbb; }
+  .daimon { margin-bottom: 3mm; }
+  .daimon .dt { break-after: avoid; }
   .daimon .dt { display: flex; align-items: flex-start; gap: 3mm; margin-bottom: 1.5mm; }
   .daimon .no { flex: none; display: inline-grid; place-items: center; width: 7mm; height: 7mm; background: #111; color: #fff; font-family: "Yu Gothic", sans-serif; font-weight: 900; font-size: 11pt; }
   .daimon .lead { font-weight: 700; }
-  .sq { display: grid; grid-template-columns: 9mm 1fr; margin: 1.2mm 0 1.2mm 4mm; break-inside: avoid; }
+  .sq { display: grid; grid-template-columns: 8mm 1fr; margin: 1mm 0 2mm 1mm; break-inside: avoid; }
   .sq .k { font-weight: 700; }
   .sq .q { white-space: pre-wrap; }
   .sq .fig { margin: 1.5mm 0; }
-  .sq .fig svg { max-width: 70mm; max-height: 45mm; }
-  .sq .ans-space { border: 1px solid #555; height: 9mm; margin-top: 1mm; width: 70%; }
-  .sq .ans-space.tall { height: 18mm; width: 100%; }
+  .sq .fig svg { max-width: 100%; max-height: 42mm; height: auto; }
+  .sq .ans-space { border: 1px solid #555; height: 7mm; margin-top: 1mm; width: 100%; }
+  .sq .ans-space.tall { height: 15mm; }
   .paper .foot { position: absolute; bottom: 7mm; left: 13mm; right: 13mm; font-size: 8pt; color: #555; display: flex; justify-content: space-between; }
   .ans .sq .q { color: #b91c1c; font-weight: 700; }
   .teacher-only { font-family: var(--font); font-size: .78rem; color: var(--muted); }
@@ -114,10 +118,12 @@
     ['basic', 'standard', 'advanced'].forEach((lv) => take(lv, Math.round(n * want[lv])));
     // 足りない分はよく出る順で埋める
     pool.slice().sort((a, b) => score(b) - score(a)).forEach((q) => { if (out.length < n && !out.includes(q)) out.push(q); });
-    // 易しい順に並べ、パターン（topic）ごとに大問にまとめる
+    // 易しい順に並べ、大問を「基本・標準・活用」にまとめる（1つの大問は6問まで）
     const order = { basic: 0, standard: 1, advanced: 2 };
-    out.sort((a, b) => (order[a.level || 'standard'] - order[b.level || 'standard']));
-    const groups = []; out.forEach((q) => { const key = q.topic || q.qtype || '問題'; let g = groups.find((x) => x.key === key && x.items.length < 4); if (!g) { g = { key, items: [] }; groups.push(g); } g.items.push(q); });
+    out.sort((a, b) => (order[a.level || 'standard'] - order[b.level || 'standard']) || String(a.topic).localeCompare(String(b.topic), 'ja'));
+    const LEAD = { basic: '次の問いに答えなさい。【基本】', standard: '次の問いに答えなさい。【標準】', advanced: '次の問いに答えなさい。【活用】' };
+    const groups = [];
+    out.forEach((q) => { const lv = q.level || 'standard'; let g = groups[groups.length - 1]; if (!g || g.lv !== lv || g.items.length >= 6) { g = { lv, lead: LEAD[lv], items: [] }; groups.push(g); } g.items.push(q); });
     return groups;
   }
 
@@ -127,18 +133,18 @@
     const title = `定期テスト予想問題　${esc(st.grade)} ${esc(st.subject)}「${esc(st.unit)}」`;
     const body = groups.map((g) => {
       n++;
-      return `<div class="daimon"><div class="dt"><span class="no">${n}</span><span class="lead">${g.items.length > 1 ? '次の問いに答えなさい。' : ''}</span></div>
+      return `<div class="daimon"><div class="dt"><span class="no">${n}</span><span class="lead">${esc(g.lead)}</span></div>
         ${g.items.map((q, i) => `<div class="sq"><span class="k">(${i + 1})</span><div>
           <div class="q">${answers ? esc(q.answer || '（解答なし）') : esc(q.question)}</div>
           ${!answers && q.figure_svg ? `<div class="fig">${q.figure_svg}</div>` : ''}
           ${!answers ? `<div class="ans-space ${/記述|証明|作図|説明/.test(q.qtype || '') ? 'tall' : ''}"></div>` : ''}
-          ${!answers && (q.frequency || 1) >= 3 ? `<span class="star noprint">★よく出る（${q.frequency}回）</span>` : ''}
+          ${!answers && (q.frequency || 1) >= 3 ? `<span class="star noprint">★${q.frequency}回</span>` : ''}
         </div></div>`).join('')}</div>`;
     }).join('');
     return `<div class="paper ${answers ? 'ans' : ''}">
       <div class="head"><div class="ttl">${answers ? '【解答】' : ''}${title}</div><div class="sub">${esc(school)}　${esc(todayYmd().replace(/-/g, '/'))}</div></div>
-      ${answers ? '' : '<div class="name">　年　<span></span>組　<span></span>番　氏名 <span class="nm"></span>　　得点 <span></span>／100</div>'}
-      ${body}
+      ${answers ? '' : '<div class="name"><span class="b"></span>年<span class="b"></span>組<span class="b"></span>番　氏名<span class="b nm"></span><span class="sp"></span>得点<span class="b"></span>／100</div>'}
+      <div class="qs">${body}</div>
       <div class="foot"><span>エイメイ学院/明成個別</span><span>${answers ? '解答' : '問題'}</span></div>
     </div>`;
   }
@@ -188,10 +194,21 @@
     if (!st.grade || !st.subject || !st.unit) { out.innerHTML = '<div class="card note">学年・教科・単元を選んでください。</div>'; return; }
     const groups = pick();
     if (!groups.length) { out.innerHTML = `<div class="card">「${esc(st.unit)}」の予想問題はまだストックにありません。<div class="note mt">Claude に「${esc(st.grade)}${esc(st.subject)}の${esc(st.unit)}の予想問題を追加して」と頼むと追加できます。</div></div>`; return; }
-    const total = groups.reduce((a, g) => a + g.items.length, 0);
-    const srcs = [...new Set(groups.flatMap((g) => g.items.map((q) => q.source_label)).filter(Boolean))];
-    out.innerHTML = sheetHtml(groups, false) + sheetHtml(groups, true)
-      + `<div class="src noprint teacher-only">${total}問　元にした過去問：${srcs.length ? srcs.map(esc).join('／') : '—'}</div>`;
+    // 紙からはみ出したら、最後の問題から1問ずつ減らす（A4 1枚に収める）
+    const overflow = () => { const p = out.querySelector('.paper'); return p && p.scrollHeight > p.clientHeight + 2; };
+    let removed = 0;
+    const draw = () => {
+      const total = groups.reduce((a, g) => a + g.items.length, 0);
+      const srcs = [...new Set(groups.flatMap((g) => g.items.map((q) => q.source_label)).filter(Boolean))];
+      out.innerHTML = (removed ? `<div class="fitnote noprint note">A4 1枚に収めるため ${total}問 にしました（${removed}問減らしました）。</div>` : '')
+        + sheetHtml(groups, false) + sheetHtml(groups, true)
+        + `<div class="src noprint teacher-only">${total}問　元にした過去問：${srcs.length ? srcs.map(esc).join('／') : '—'}</div>`;
+    };
+    draw();
+    while (overflow() && groups.reduce((a, g) => a + g.items.length, 0) > 3) {
+      const last = groups[groups.length - 1]; last.items.pop(); if (!last.items.length) groups.pop();
+      removed++; draw();
+    }
   }
 
   if (pass) api.teacherLogin(pass).then(start).catch(() => renderLogin());

@@ -374,7 +374,8 @@
     const units = [...String(s || '').toLowerCase().replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xFEE0)).matchAll(/unit\s*(\d+)/g)].map((m) => 'unit' + m[1]);
     return [...new Set(toks.concat(units))];
   };
-  const matHay = (m) => matchNorm(m.unit) + '|' + matchNorm(m.title) + '|' + matchNorm(m.path);
+  // 教材ごとの照合用文字列は1回だけ作る（1000件×カード枚数を毎回計算しないため）
+  const matHay = (m) => (m._hay != null ? m._hay : (m._hay = matchNorm(m.unit) + '|' + matchNorm(m.title) + '|' + matchNorm(m.path)));
   const shortTitle = (t) => String(t || '').replace(/\.(pdf|docx?|pptx?|jpe?g|png)$/i, '');
   // 依頼に合う教材を点数づけして並べる。unitHit = 単元が合っている
   function suggestMaterials(r, limit) {

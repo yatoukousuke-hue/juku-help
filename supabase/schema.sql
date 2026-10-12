@@ -518,13 +518,16 @@ begin
   return v_s;
 end $$;
 
--- 印刷用教材の一覧（講師だけ）
+-- 印刷用教材の一覧（講師だけ）。1,000件を超えても全部返すよう、1つの JSON 配列で返す（API の行数上限を受けない）
+drop function if exists public.teacher_materials(text);
 create or replace function public.teacher_materials(p_pass text)
-returns setof public.print_materials
+returns jsonb
 language plpgsql security definer set search_path = public as $$
 begin
   perform check_pass(p_pass);
-  return query select * from print_materials order by subject, title;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', m.id, 'drive_id', m.drive_id, 'title', m.title, 'url', m.url, 'subject', m.subject,
+           'grades', m.grades, 'unit', m.unit, 'categories', m.categories, 'level', m.level, 'path', m.path, 'note', m.note,
+           'hidden', m.hidden, 'locked', m.locked, 'source', m.source) order by m.subject, m.title) from print_materials m), '[]'::jsonb);
 end $$;
 
 -- 取り込み（ドライブから作った一覧）: drive_id で上書き。先生が直した行（locked）は分類を上書きしない

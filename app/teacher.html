@@ -58,6 +58,7 @@
   let doneRows = null;            // 過去日の完了一覧（読み込み結果）
   let recentPrints = [];          // 直近のプリント依頼
   let materialsAll = [];          // 印刷用の教材（ドライブのファイル名とリンク）
+  let materialsLoadedAt = 0;      // 教材一覧は大きいので 10 分ごとに読み直す
   let ctxTimer = null;
   const firstOfMonth = (d) => ymd(new Date(d.getFullYear(), d.getMonth(), 1));
   const lastOfMonth = (d) => ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0));
@@ -736,8 +737,10 @@
   // 名簿・点数・直近プリントをまとめて読む（カードのおすすめ表示に使う）
   async function loadContext() {
     try {
-      const [st, sc, rp, mt] = await Promise.all([api.teacherStudents(pass), api.teacherScoresAll(pass), api.teacherRecentPrints(pass, C.RECENT_PRINT_DAYS || 14), api.teacherMaterials(pass).catch(() => [])]);
-      students = st; scoresAll = sc; recentPrints = rp; materialsAll = mt || [];
+      const needMat = Date.now() - materialsLoadedAt > 10 * 60 * 1000;
+      const [st, sc, rp, mt] = await Promise.all([api.teacherStudents(pass), api.teacherScoresAll(pass), api.teacherRecentPrints(pass, C.RECENT_PRINT_DAYS || 14), needMat ? api.teacherMaterials(pass).catch(() => null) : Promise.resolve(null)]);
+      students = st; scoresAll = sc; recentPrints = rp;
+      if (Array.isArray(mt)) { materialsAll = mt; materialsLoadedAt = Date.now(); }
       if (['waiting', 'in_progress'].includes(tab)) renderList();
     } catch (_) {}
   }

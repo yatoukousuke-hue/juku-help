@@ -47,5 +47,18 @@ const all = [
   ['index.html?form=question', '22_student_question.png'],
 ];
 for (const [u, n] of all) if (!targets.length || targets.some((t) => n.includes(t))) await shot(u, n);
+// 操作つきの画面（まとめて選ぶ・元に戻す）
+const clickText = (label) => page.evaluate((l) => { const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim().startsWith(l)); if (b) b.click(); return !!b; }, label);
+if (!targets.length || targets.some((t) => '15_teacher_select.png 16_teacher_undo.png'.includes(t))) {
+  await page.goto(base + 'teacher.html', { waitUntil: 'networkidle0' }); await new Promise((r) => setTimeout(r, 900));
+  await clickText('☑ まとめて選ぶ'); await new Promise((r) => setTimeout(r, 200));
+  await page.evaluate(() => { const c = [...document.querySelectorAll('.req.selectable')]; c.slice(1, 3).forEach((el, i) => setTimeout(() => document.getElementById(el.id).click(), i * 100)); });
+  await new Promise((r) => setTimeout(r, 500));
+  await page.screenshot({ path: path.join(shots, '15_teacher_select.png'), fullPage: false }); console.log('shot 15_teacher_select.png');
+  await clickText('やめる'); await new Promise((r) => setTimeout(r, 300));
+  await page.evaluate(() => { const b = document.querySelector('.req .actions .btn.ok'); if (b) b.click(); });
+  await new Promise((r) => setTimeout(r, 800));
+  await page.screenshot({ path: path.join(shots, '16_teacher_undo.png'), fullPage: false }); console.log('shot 16_teacher_undo.png');
+}
 await browser.close();
 server.close();

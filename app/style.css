@@ -309,3 +309,20 @@ body:not(.teacher) .req .l2.tags .where { background: var(--primary-soft); color
 html.embed .topbar h1 { font-size: 1rem; }
 html.embed .demo-banner { display: none; }
 html.embed .app { padding-top: 4px; }
+
+/* まとめて選ぶ */
+.req.selectable { cursor: pointer; user-select: none; }
+.req.selectable .pick { flex: none; display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--line); background: var(--card); color: #fff; font-weight: 900; margin-right: 4px; }
+.req.selectable.picked { outline: 3px solid var(--primary); outline-offset: -1px; }
+.req.selectable.picked .pick { background: var(--primary); border-color: var(--primary); }
+/* 画面の下の帯（まとめて操作・元に戻す） */
+.bottombar { position: fixed; left: 8px; right: 8px; bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 60; max-width: 624px; margin: 0 auto;
+  background: #1c1f2e; color: #fff; border-radius: 14px; padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; box-shadow: 0 8px 28px rgba(0,0,0,.28); }
+.bottombar .msg, .bottombar .cnt { font-weight: 800; }
+.bottombar .btn.xs { padding: 9px 12px; font-size: .9rem; }
+.bottombar .btn.ghost { background: rgba(255,255,255,.14); color: #fff; box-shadow: none; }
+.bottombar .btn:disabled { opacity: .35; }
+#undoBar { bottom: calc(10px + env(safe-area-inset-bottom)); }
+#bulkBar ~ #undoBar, #undoBar ~ #bulkBar { bottom: calc(76px + env(safe-area-inset-bottom)); }
+body.has-bar .app { padding-bottom: 130px; }
+.filterbar .spacer { flex: 1; }

@@ -51,6 +51,10 @@
   let scoresAll = [];             // 点数（講師だけ）
   let doneDay = todayYmd();       // 完了タブで見る日付
   let filtersOpen = false;        // 絞り込みを開いているか
+  let selecting = false;          // 「まとめて選ぶ」モード
+  const picked = new Set();       // 選んだ依頼の id
+  const busy = new Set();         // 処理中の依頼（二重押し防止）
+  let undoState = null, undoTimer = null;   // 直前の完了（元に戻す用）
   let doneRows = null;            // 過去日の完了一覧（読み込み結果）
   let recentPrints = [];          // 直近のプリント依頼
   let ctxTimer = null;
@@ -204,12 +208,13 @@
   function renderBody() {
     $$('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
     const body = $('#body');
+    if (!['waiting', 'in_progress'].includes(tab)) { selecting = false; picked.clear(); renderBulkBar([]); }
     if (tab === 'records') return renderRecords(body);
     if (tab === 'settings') return renderSettings(body);
     if (tab === 'done') return renderDone(body);
     const active = [filterRoom, filterKind === 'print' ? 'プリント' : filterKind === 'question' ? '質問' : '', filterGrade, filterSchool, filterSubject, sortMode === 'group' ? '学年→教科→単元' : ''].filter(Boolean);
     const open = filtersOpen || active.length > 0;
-    body.innerHTML = `<div class="filterbar"><button class="btn xs ${active.length ? 'soft' : 'ghost'}" id="fToggle">🔍 絞り込み${active.length ? '：' + active.map(esc).join('・') : ''} ${open ? '▲' : '▼'}</button>${active.length ? '<button class="btn xs ghost" id="fClear">解除</button>' : ''}</div>
+    body.innerHTML = `<div class="filterbar"><button class="btn xs ${active.length ? 'soft' : 'ghost'}" id="fToggle">🔍 絞り込み${active.length ? '：' + active.map(esc).join('・') : ''} ${open ? '▲' : '▼'}</button>${active.length ? '<button class="btn xs ghost" id="fClear">解除</button>' : ''}<span class="spacer"></span><button class="btn xs ${selecting ? 'soft' : 'ghost'}" id="bSelect">☑ ${selecting ? '選ぶのをやめる' : 'まとめて選ぶ'}</button></div>
       <div class="filters ${open ? '' : 'hidden'}">
         <select id="fRoom"><option value="">全教室</option>${C.CLASSROOMS.map((c) => `<option ${filterRoom === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
         <select id="fKind"><option value="">種類：全部</option><option value="question" ${filterKind === 'question' ? 'selected' : ''}>質問</option><option value="print" ${filterKind === 'print' ? 'selected' : ''}>プリント</option></select>
@@ -223,6 +228,7 @@
       ${filterUrgent ? '<div class="small" style="color:var(--danger);margin:-4px 0 8px">🔴 「早めに来てほしい」だけ表示中（上のタイルで解除）</div>' : ''}
       <div id="groupBar"></div><div id="list"></div>`;
     $('#fToggle').onclick = () => { filtersOpen = !open; renderBody(); };
+    $('#bSelect').onclick = () => { selecting = !selecting; picked.clear(); renderBody(); };
     if ($('#fClear')) $('#fClear').onclick = () => { filterRoom = filterKind = filterGrade = filterSchool = filterSubject = ''; sortMode = 'time'; filterUrgent = false; filtersOpen = false; renderBody(); renderSummary(); };
     $('#fRoom').onchange = (e) => { filterRoom = e.target.value; renderList(); };
     $('#fKind').onchange = (e) => { filterKind = e.target.value; renderList(); };
@@ -389,16 +395,17 @@
     const simBadge = sim.length ? `<button class="simbadge" data-act="group" data-id="${r.id}" title="同じ学年・教科・単元の依頼">🔁 同じ単元 あと${sim.length}人</button>` : '';
     const tags = (r.memo_tags || []).map((t) => `<span class="tag ${t === C.FOLLOW_TAG ? 'follow' : ''}">${esc(t)}</span>`).join('');
     const longWait = ['waiting', 'in_progress'].includes(r.status) && minutesSince(r.created_at) >= (C.URGENT_ALERT_MIN || 5) * 2;
-    return `<div class="req ${r.status} ${urgent ? 'urgent' : ''} ${overdue ? 'overdue' : ''} ${isNew ? 'new' : ''} ${longWait ? 'longwait' : ''}" id="req-${r.id}">
-      <div class="l1"><span class="who">${esc(r.student_name)}${r.grade || schoolOf(r) ? `<span class="muted small">（${esc(r.grade)}${schoolOf(r) ? '・' + esc(schoolOf(r)) : ''}）</span>` : ''}${!r.student_id ? ' <span class="unlinked">名簿外</span>' : ''}</span><span class="time">${timeTxt}</span></div>
+    const sel = selecting && ['waiting', 'in_progress'].includes(r.status);
+    return `<div class="req ${r.status} ${urgent ? 'urgent' : ''} ${overdue ? 'overdue' : ''} ${isNew ? 'new' : ''} ${longWait ? 'longwait' : ''} ${sel ? 'selectable' : ''} ${sel && picked.has(r.id) ? 'picked' : ''}" id="req-${r.id}">
+      <div class="l1">${sel ? `<span class="pick">${picked.has(r.id) ? '✓' : ''}</span>` : ''}<span class="who">${esc(r.student_name)}${r.grade || schoolOf(r) ? `<span class="muted small">（${esc(r.grade)}${schoolOf(r) ? '・' + esc(schoolOf(r)) : ''}）</span>` : ''}${!r.student_id ? ' <span class="unlinked">名簿外</span>' : ''}</span><span class="time">${timeTxt}</span></div>
       <div class="l2 big"><span class="subj">${esc(r.subject)}</span><span class="unit">${esc(r.unit_name || '（単元なし）')}</span><span class="range">${esc(r.page_range || '')}</span></div>
       <div class="l2 tags"><span class="where">${esc(r.classroom)}</span><span class="kind">${KIND_ICON[r.kind]}${KIND_LABEL[r.kind]}</span>${r.urgency === 'now' ? '<span class="badge now">早めに</span>' : ''}${r.kind === 'print' ? `<span class="tag">${esc(PURPOSE_LABEL[r.purpose] || '')}</span><span class="tag">${esc([DIFF_LABEL[r.difficulty], AMOUNT_LABEL[r.amount]].filter(Boolean).join('・'))}</span>` : ''}${miniFlags(r)}${simBadge}${r.content && !isOpen ? '<span class="sub">＋補足あり</span>' : ''}</div>
       ${isOpen ? flagsHtml(r) : assistCompact(r)}
       ${isOpen ? assistHtml(r) : ''}
       ${isOpen ? detailTable(r) : ''}
       ${(r.memo || tags) ? `<div class="memo">${tags}${esc(r.memo || '')}</div>` : ''}
-      <div class="l3"><span class="meta">#${r.receipt_no}　${fmtTime(r.created_at)} 受付${r.teacher ? `・担当 ${esc(r.teacher)}` : ''}</span>${detailBtn}${slipBtn}${linkBtn}${cancelBtn}${secondary}</div>
-      ${primary ? `<div class="actions">${primary}</div>` : ''}
+      ${sel ? '' : `<div class="l3"><span class="meta">#${r.receipt_no}　${fmtTime(r.created_at)} 受付${r.teacher ? `・担当 ${esc(r.teacher)}` : ''}</span>${detailBtn}${slipBtn}${linkBtn}${cancelBtn}${secondary}</div>
+      ${primary ? `<div class="actions">${primary}</div>` : ''}`}
     </div>`;
   }
 
@@ -417,9 +424,87 @@
     const nid = new Set(newIds || []);
     list.innerHTML = items.length ? items.map((r) => cardHtml(r, nid.has(r.id))).join('')
       : `<div class="empty">${tab === 'waiting' ? '待っている依頼はありません 🎉' : tab === 'in_progress' ? '対応中の依頼はありません' : '今日の完了はまだありません'}</div>`;
+    if (selecting) {
+      const live = new Set(items.filter((r) => ['waiting', 'in_progress'].includes(r.status)).map((r) => r.id));
+      [...picked].forEach((id) => { if (!rows.some((r) => r.id === id && ['waiting', 'in_progress'].includes(r.status))) picked.delete(id); });
+      $$('.req.selectable', list).forEach((el) => { el.onclick = (ev) => { ev.preventDefault(); const id = Number(el.id.replace('req-', '')); if (picked.has(id)) picked.delete(id); else picked.add(id); renderList(); }; });
+      renderBulkBar(items.filter((r) => live.has(r.id)));
+      return;
+    }
+    renderBulkBar([]);
     $$('[data-act]', list).forEach((b) => b.onclick = () => onAction(b.dataset.act, Number(b.dataset.id), b));
     // 2行目（内容）をタップしても詳細を開閉できる
     $$('.req .l2, .req .assist.mini', list).forEach((el) => { el.style.cursor = 'pointer'; el.onclick = (ev) => { if (ev.target.closest('button')) return; const id = Number(el.closest('.req').id.replace('req-', '')); if (expanded.has(id)) expanded.delete(id); else expanded.add(id); renderList(); }; });
+  }
+
+  // 画面の下に出る帯（まとめて操作 / 元に戻す）
+  function bar(id) {
+    let el = document.getElementById(id);
+    if (!el) { el = document.createElement('div'); el.id = id; el.className = 'bottombar'; document.body.appendChild(el); }
+    return el;
+  }
+  function dropBar(id) { const el = document.getElementById(id); if (el) el.remove(); document.body.classList.toggle('has-bar', !!document.querySelector('.bottombar')); }
+  function renderBulkBar(visible) {
+    if (!selecting) return dropBar('bulkBar');
+    const el = bar('bulkBar');
+    const chosen = rows.filter((r) => picked.has(r.id));
+    const prints = chosen.filter((r) => r.kind === 'print');
+    el.innerHTML = `<b class="cnt">${chosen.length}件 選択中</b>
+      <button class="btn xs ghost" id="bAll">全部（${visible.length}）</button>
+      <span class="spacer"></span>
+      <button class="btn xs" id="bStart" ${chosen.some((r) => r.status === 'waiting') ? '' : 'disabled'}>🏃 対応する</button>
+      <button class="btn xs ok" id="bDone" ${chosen.length ? '' : 'disabled'}>✅ 完了</button>
+      <button class="btn xs ghost" id="bSlip" ${prints.length ? '' : 'disabled'}>📄 指示書</button>
+      <button class="btn xs ghost" id="bExit">やめる</button>`;
+    document.body.classList.add('has-bar');
+    $('#bAll', el).onclick = () => { visible.forEach((r) => picked.add(r.id)); renderList(); };
+    $('#bExit', el).onclick = () => { selecting = false; picked.clear(); renderBody(); };
+    $('#bSlip', el).onclick = () => openMultiSlipModal(prints);
+    $('#bStart', el).onclick = async () => {
+      const targets = chosen.filter((r) => r.status === 'waiting');
+      for (const r of targets) { try { await api.teacherUpdate(pass, r.id, 'start', tname, null, null); } catch (e) { toast(errorText(e), 'error'); } }
+      toast(`${targets.length}件を対応中にしました`, 'ok');
+      selecting = false; picked.clear(); await refresh(true); renderBody();
+    };
+    $('#bDone', el).onclick = async () => { const list = chosen.slice(); selecting = false; picked.clear(); await quickDone(list); renderBody(); };
+  }
+
+  // 完了（1タップ）。メモは「元に戻す」の帯の「メモ」か、完了タブの「メモ」から後で書ける
+  async function quickDone(list) {
+    list = list.filter((r) => !busy.has(r.id));
+    if (!list.length) return;
+    const prev = list.map((r) => ({ id: r.id, status: r.status, teacher: r.teacher }));
+    list.forEach((r) => busy.add(r.id));
+    let ok = 0;
+    for (const r of list) {
+      try { await api.teacherUpdate(pass, r.id, 'done', r.teacher || tname, null, []); ok++; }
+      catch (e) { toast(errorText(e), 'error'); }
+      finally { busy.delete(r.id); }
+    }
+    await refresh(true);
+    if (ok) showUndo(prev, list);
+  }
+  function showUndo(prev, list) {
+    undoState = { prev, ids: list.map((r) => r.id) };
+    if (undoTimer) clearTimeout(undoTimer);
+    const el = bar('undoBar');
+    const one = list.length === 1 ? list[0] : null;
+    el.innerHTML = `<span class="msg">✅ ${one ? `${esc(one.student_name)}（${esc(one.subject)}${one.unit_name ? '・' + esc(one.unit_name) : ''}）を完了` : `${list.length}件を完了`}</span>
+      <span class="spacer"></span>${one ? '<button class="btn xs ghost" id="uMemo">メモ</button>' : ''}<button class="btn xs" id="uUndo">元に戻す</button>`;
+    document.body.classList.add('has-bar');
+    if ($('#uMemo', el)) $('#uMemo', el).onclick = () => { const r = rows.find((x) => x.id === one.id); dropBar('undoBar'); if (r) openDoneModal(r); };
+    $('#uUndo', el).onclick = async () => {
+      const st = undoState; dropBar('undoBar'); undoState = null; if (!st) return;
+      for (const p of st.prev) {
+        try {
+          await api.teacherUpdate(pass, p.id, 'reopen', null, null, null);
+          if (p.status === 'in_progress') await api.teacherUpdate(pass, p.id, 'start', p.teacher || tname, null, null);
+        } catch (e) { toast(errorText(e), 'error'); }
+      }
+      toast('元に戻しました');
+      await refresh(true);
+    };
+    undoTimer = setTimeout(() => { dropBar('undoBar'); undoState = null; }, 10000);
   }
 
   // 表示中のプリント依頼を 学年・教科・単元 でまとめた一覧（2件以上のグループだけ）
@@ -469,7 +554,7 @@
       armed = { id: null, until: 0 };
       return doUpdate(id, 'cancel', null, null, null);
     }
-    if (act === 'done') return openDoneModal(r);
+    if (act === 'done') return (C.DONE_ONE_TAP !== false && ['waiting', 'in_progress'].includes(r.status)) ? quickDone([r]) : openDoneModal(r);
     if (act === 'link') return openLinkModal(r);
   }
   async function doUpdate(id, action, teacher, memo, tags) {
@@ -486,7 +571,8 @@
   }
   function openDoneModal(r) {
     const selected = new Set(r.memo_tags || []);
-    const bg = modal(`<h3>完了にする：${esc(r.student_name)}（${esc(r.subject)} ${KIND_LABEL[r.kind]}）</h3>
+    const isDone = r.status === 'done';
+    const bg = modal(`<h3>${isDone ? 'メモ' : '完了にする'}：${esc(r.student_name)}（${esc(r.subject)} ${KIND_LABEL[r.kind]}）</h3>
       ${detailTable(r)}
       <label class="lbl">メモ（ボタンで選択・複数可）</label>
       <div class="chips" id="tagChips">${C.MEMO_TEMPLATES.map((t) => `<button class="chip ${selected.has(t) ? 'selected' : ''} ${t === C.FOLLOW_TAG ? 'danger' : ''}" data-tag="${esc(t)}">${esc(t)}</button>`).join('')}</div>
@@ -494,7 +580,7 @@
       <textarea class="input" id="memoText" placeholder="例: 関数の変域でつまずき。類題を渡した">${esc(r.memo || '')}</textarea>
       <label class="lbl">担当講師</label>
       <input class="input" id="memoTeacher" value="${esc(r.teacher || tname)}">
-      <div class="row mt" style="margin-top:16px"><button class="btn ghost" id="mCancel">キャンセル</button><span class="spacer"></span><button class="btn ok" id="mSave">完了にする</button></div>`);
+      <div class="row mt" style="margin-top:16px"><button class="btn ghost" id="mCancel">キャンセル</button><span class="spacer"></span><button class="btn ok" id="mSave">${isDone ? 'メモを保存' : '完了にする'}</button></div>`);
     $$('#tagChips .chip', bg).forEach((b) => b.onclick = () => { const t = b.dataset.tag; if (selected.has(t)) selected.delete(t); else selected.add(t); b.classList.toggle('selected'); });
     $('#mCancel', bg).onclick = () => bg.remove();
     $('#mSave', bg).onclick = async () => {

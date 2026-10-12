@@ -326,3 +326,21 @@ html.embed .app { padding-top: 4px; }
 #bulkBar ~ #undoBar, #undoBar ~ #bulkBar { bottom: calc(76px + env(safe-area-inset-bottom)); }
 body.has-bar .app { padding-bottom: 130px; }
 .filterbar .spacer { flex: 1; }
+
+/* 印刷候補 */
+.assist .print-sg { margin-top: 2px; }
+.assist .print-sg .btn.xs { margin-left: 6px; padding: 3px 8px; font-size: .75rem; }
+ul.mats { list-style: none; padding: 0; margin: 4px 0 0; }
+ul.mats li { padding: 5px 0; border-top: 1px dashed var(--line); font-size: .88rem; }
+ul.mats li:first-child { border-top: 0; }
+ul.mats a { font-weight: 800; color: var(--primary-dark); word-break: break-all; }
+.cat { display: inline-block; border-radius: 6px; padding: 0 6px; font-size: .72rem; font-weight: 800; margin-left: 2px; }
+.cat.c-intro { background: #e0f2fe; color: #0369a1; }
+.cat.c-weak { background: #fef3c7; color: #b45309; }
+.cat.c-practice { background: #dcfce7; color: #15803d; }
+.cat.c-test { background: #ede9fe; color: #6d28d9; }
+.cat.c-hard { background: #fee2e2; color: #b91c1c; }
+.matrow { padding: 8px 0; border-top: 1px solid var(--line); }
+.matrow.inactive { opacity: .55; }
+.matrow .chips { margin-top: 4px; gap: 4px; }
+.matrow .chip { padding: 4px 8px; font-size: .78rem; min-width: 0; }

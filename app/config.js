@@ -48,7 +48,7 @@ window.APP_CONFIG = {
 
   // --- 講師側「プリント指示書」の文面テンプレート ---
   // {} の中は自動で置き換わります: date, grade, name, school, subject, purpose, unit, range,
-  //   difficulty, amount, content, checks, reason, teacher, score, target, level, texts
+  //   difficulty, amount, content, checks, reason, teacher, score, target, level, texts, materials
   PRINT_SLIP_TEMPLATE:
 "【プリント作成依頼】{date}\n" +
 "{grade} {name}さん（{school}）　{subject}\n" +
@@ -60,6 +60,7 @@ window.APP_CONFIG = {
 "本人の補足：{content}\n" +
 "直近の点数：{score}　目標：{target}　→ おすすめレベル：{level}\n" +
 "テキスト候補：{texts}\n" +
+"ドライブの印刷候補：{materials}\n" +
 "\n" +
 "上記の範囲から、{difficulty}レベルの「{purpose}」プリントを{amount}で作ってください。\n" +
 "・教科書の該当範囲（{range}）で扱う内容だけを使う\n" +

@@ -10,3 +10,5 @@ dev/scores_import.json
 dev/kyozai.txt
 dev/preview/
 dev/shots/
+dev/drive_materials.json
+dev/drive_materials_*.json

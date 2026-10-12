@@ -85,6 +85,28 @@ create table if not exists public.student_scores (
 alter table public.student_scores enable row level security;
 revoke all on public.student_scores from anon, authenticated;
 
+-- 印刷用の教材（Google ドライブのファイル名とリンクだけ。中身は持たない。講師だけが見られる）
+-- categories: intro=苦手な子の導入 / weak=弱点補強 / practice=類題演習 / test=テスト形式 / hard=難しい問題
+create table if not exists public.print_materials (
+  id         bigserial primary key,
+  drive_id   text unique,                        -- ドライブのファイルID（手で足した教材は null）
+  title      text not null,
+  url        text not null,
+  subject    text not null default '',
+  grades     text[] not null default '{}',       -- {"中2"} など。空なら学年を問わない
+  unit       text not null default '',
+  categories text[] not null default '{}',
+  level      text check (level in ('basic','standard','advanced')),
+  path       text not null default '',           -- フォルダの場所（例: 教材 > 数学 > 中2）
+  note       text not null default '',
+  hidden     boolean not null default false,     -- 候補に出さない
+  locked     boolean not null default false,     -- 先生が手で直した（取り込み直しで上書きしない）
+  source     text not null default 'drive',
+  updated_at timestamptz not null default now()
+);
+alter table public.print_materials enable row level security;
+revoke all on public.print_materials from anon, authenticated;
+
 -- ---------- 2. 直接アクセス禁止（すべて下の関数経由にする） ----------
 
 alter table public.app_settings enable row level security;
@@ -496,6 +518,77 @@ begin
   return v_s;
 end $$;
 
+-- 印刷用教材の一覧（講師だけ）
+create or replace function public.teacher_materials(p_pass text)
+returns setof public.print_materials
+language plpgsql security definer set search_path = public as $$
+begin
+  perform check_pass(p_pass);
+  return query select * from print_materials order by subject, title;
+end $$;
+
+-- 取り込み（ドライブから作った一覧）: drive_id で上書き。先生が直した行（locked）は分類を上書きしない
+create or replace function public.teacher_import_materials(p_pass text, p_rows jsonb)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare v_n int := 0; v_r jsonb;
+begin
+  perform check_pass(p_pass);
+  if jsonb_typeof(p_rows) <> 'array' then raise exception 'BAD_ROWS'; end if;
+  for v_r in select * from jsonb_array_elements(p_rows) loop
+    if coalesce(v_r->>'drive_id','') = '' or coalesce(v_r->>'title','') = '' or coalesce(v_r->>'url','') = '' then continue; end if;
+    insert into print_materials (drive_id, title, url, subject, grades, unit, categories, level, path, note, source)
+    values (v_r->>'drive_id', v_r->>'title', v_r->>'url', coalesce(v_r->>'subject',''),
+            coalesce(array(select jsonb_array_elements_text(v_r->'grades')), '{}'),
+            coalesce(v_r->>'unit',''),
+            coalesce(array(select jsonb_array_elements_text(v_r->'categories')), '{}'),
+            nullif(v_r->>'level',''), coalesce(v_r->>'path',''), coalesce(v_r->>'note',''), 'drive')
+    on conflict (drive_id) do update set
+      title = excluded.title, url = excluded.url, path = excluded.path, updated_at = now(),
+      subject    = case when print_materials.locked then print_materials.subject    else excluded.subject end,
+      grades     = case when print_materials.locked then print_materials.grades     else excluded.grades end,
+      unit       = case when print_materials.locked then print_materials.unit       else excluded.unit end,
+      categories = case when print_materials.locked then print_materials.categories else excluded.categories end,
+      level      = case when print_materials.locked then print_materials.level      else excluded.level end;
+    v_n := v_n + 1;
+  end loop;
+  return jsonb_build_object('imported', v_n);
+end $$;
+
+-- 1件を直す／手で足す（p_id が null なら追加）。直した行は locked になる
+create or replace function public.teacher_save_material(p_pass text, p_id bigint, p_fields jsonb)
+returns public.print_materials
+language plpgsql security definer set search_path = public as $$
+declare v_m print_materials%rowtype;
+begin
+  perform check_pass(p_pass);
+  if p_fields is null or jsonb_typeof(p_fields) <> 'object' then raise exception 'BAD_FIELDS'; end if;
+  if p_id is null then
+    if coalesce(p_fields->>'title','') = '' or coalesce(p_fields->>'url','') = '' then raise exception 'BAD_FIELDS'; end if;
+    insert into print_materials (title, url, subject, grades, unit, categories, level, note, source, locked)
+    values (p_fields->>'title', p_fields->>'url', coalesce(p_fields->>'subject',''),
+            coalesce(array(select jsonb_array_elements_text(p_fields->'grades')), '{}'), coalesce(p_fields->>'unit',''),
+            coalesce(array(select jsonb_array_elements_text(p_fields->'categories')), '{}'), nullif(p_fields->>'level',''),
+            coalesce(p_fields->>'note',''), 'manual', true)
+    returning * into v_m;
+    return v_m;
+  end if;
+  update print_materials set
+    title      = coalesce(p_fields->>'title', title),
+    url        = coalesce(p_fields->>'url', url),
+    subject    = coalesce(p_fields->>'subject', subject),
+    grades     = case when p_fields ? 'grades' then coalesce(array(select jsonb_array_elements_text(p_fields->'grades')), '{}') else grades end,
+    unit       = coalesce(p_fields->>'unit', unit),
+    categories = case when p_fields ? 'categories' then coalesce(array(select jsonb_array_elements_text(p_fields->'categories')), '{}') else categories end,
+    level      = case when p_fields ? 'level' then nullif(p_fields->>'level','') else level end,
+    note       = coalesce(p_fields->>'note', note),
+    hidden     = coalesce((p_fields->>'hidden')::boolean, hidden),
+    locked     = true, updated_at = now()
+  where id = p_id returning * into v_m;
+  if not found then raise exception 'NOT_FOUND'; end if;
+  return v_m;
+end $$;
+
 -- 合言葉の変更
 create or replace function public.teacher_set_pass(p_pass text, p_new text) returns boolean
 language plpgsql security definer set search_path = public as $$
@@ -520,6 +613,7 @@ grant execute on function
   public.teacher_import_scores(text,jsonb), public.teacher_scores_all(text),
   public.teacher_set_targets(text,bigint,jsonb), public.teacher_recent_prints(text,int),
   public.teacher_set_student_active(text,bigint,boolean),
+  public.teacher_materials(text), public.teacher_import_materials(text,jsonb), public.teacher_save_material(text,bigint,jsonb),
   public.teacher_set_pass(text,text)
 to anon, authenticated;
 

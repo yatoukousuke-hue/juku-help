@@ -123,6 +123,9 @@
       teacherSetTargets: (pass, sid, targets) => call('teacher_set_targets', { p_pass: pass, p_student_id: sid, p_targets: targets }),
       teacherRecentPrints: (pass, days) => call('teacher_recent_prints', { p_pass: pass, p_days: days }),
       teacherSetStudentActive: (pass, sid, active) => call('teacher_set_student_active', { p_pass: pass, p_student_id: sid, p_active: !!active }),
+      teacherMaterials: (pass) => call('teacher_materials', { p_pass: pass }),
+      teacherImportMaterials: (pass, rows) => call('teacher_import_materials', { p_pass: pass, p_rows: rows }),
+      teacherSaveMaterial: (pass, id, fields) => call('teacher_save_material', { p_pass: pass, p_id: id ?? null, p_fields: fields }),
     };
   }
 
@@ -223,6 +226,23 @@
       },
       teacherScoresAll: async (pass) => { const db = load(); checkPass(db, pass); return delay((db.scores || []).filter((x) => (db.students.find((s) => s.id === x.student_id) || {}).active).map((x) => ({ ...x }))); },
       teacherSetTargets: async (pass, sid, targets) => { const db = load(); checkPass(db, pass); const s = db.students.find((x) => x.id === sid); if (!s) throw new Error('NO_STUDENT'); s.targets = targets || {}; save(db); return delay({ ...s }); },
+      teacherMaterials: async (pass) => { const db = load(); checkPass(db, pass); return delay((db.materials || []).map((m) => ({ ...m }))); },
+      teacherImportMaterials: async (pass, rows) => {
+        const db = load(); checkPass(db, pass); db.materials = db.materials || []; let n = 0;
+        for (const r of rows) { if (!r.drive_id || !r.title || !r.url) continue;
+          const ex = db.materials.find((m) => m.drive_id === r.drive_id);
+          const base = { title: r.title, url: r.url, path: r.path || '' };
+          const cls = { subject: r.subject || '', grades: r.grades || [], unit: r.unit || '', categories: r.categories || [], level: r.level || null };
+          if (ex) Object.assign(ex, base, ex.locked ? {} : cls); else db.materials.push({ id: db.materials.length + 1, drive_id: r.drive_id, ...base, ...cls, note: '', hidden: false, locked: false, source: 'drive' });
+          n++; }
+        save(db); return delay({ imported: n });
+      },
+      teacherSaveMaterial: async (pass, id, f) => {
+        const db = load(); checkPass(db, pass); db.materials = db.materials || [];
+        if (id == null) { if (!f.title || !f.url) throw new Error('BAD_FIELDS'); const m = { id: db.materials.length + 1, drive_id: null, title: f.title, url: f.url, subject: f.subject || '', grades: f.grades || [], unit: f.unit || '', categories: f.categories || [], level: f.level || null, path: '', note: f.note || '', hidden: false, locked: true, source: 'manual' }; db.materials.push(m); save(db); return delay({ ...m }); }
+        const m = db.materials.find((x) => x.id === id); if (!m) throw new Error('NOT_FOUND');
+        Object.assign(m, f, { locked: true }); save(db); return delay({ ...m });
+      },
       teacherSetStudentActive: async (pass, sid, active) => { const db = load(); checkPass(db, pass); const s = db.students.find((x) => x.id === sid); if (!s) throw new Error('NO_STUDENT'); s.active = !!active; save(db); return delay({ ...s }); },
       teacherRecentPrints: async (pass, days) => { const db = load(); checkPass(db, pass); const from = new Date(Date.now() - (days || 14) * 86400e3 + 9 * 3600e3).toISOString().slice(0, 10); return delay(db.requests.filter((r) => r.kind === 'print' && r.status !== 'cancelled' && r.day >= from).sort((a, b) => b.created_at.localeCompare(a.created_at)).map((r) => ({ id: r.id, student_id: r.student_id, student_name: r.student_name, grade: r.grade, subject: r.subject, unit_name: r.unit_name, page_range: r.page_range, purpose: r.purpose, difficulty: r.difficulty, amount: r.amount, status: r.status, day: r.day, created_at: r.created_at, done_at: r.done_at, teacher: r.teacher, memo: r.memo, memo_tags: r.memo_tags }))); },
     };

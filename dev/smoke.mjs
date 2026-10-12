@@ -149,6 +149,13 @@ ok('一覧に3件', t.w.document.querySelectorAll('.req').length === 3, t.text()
   ]);
   ok('点数の取り込み（お試し）', imp.imported === 3);
   await api.teacherSetTargets('sensei', sato.id, { 数学: 95, '5科': 470 });
+  const mi = await api.teacherImportMaterials('sensei', [
+    { drive_id: 'm1', title: '中2数学 一次関数 類題演習プリント.pdf', url: 'https://drive.google.com/file/d/m1/view', subject: '数学', grades: ['中2'], unit: '一次関数', categories: ['practice'], level: 'standard', path: '教材 > 数学 > 中2' },
+    { drive_id: 'm2', title: '中2数学 一次関数 発展問題.pdf', url: 'https://drive.google.com/file/d/m2/view', subject: '数学', grades: ['中2'], unit: '一次関数', categories: ['hard'], level: 'advanced', path: '教材 > 数学 > 中2' },
+    { drive_id: 'm3', title: '中1数学 一次関数の準備.pdf', url: 'https://drive.google.com/file/d/m3/view', subject: '数学', grades: ['中1'], unit: '比例', categories: ['intro'], level: 'basic', path: '教材 > 数学 > 中1' },
+    { drive_id: 'm4', title: '中2英語 不定詞 確認テスト.pdf', url: 'https://drive.google.com/file/d/m4/view', subject: '英語', grades: ['中2'], unit: '不定詞', categories: ['test'], level: 'standard', path: '教材 > 英語' },
+  ]);
+  ok('教材の取り込み（お試し）', mi.imported === 4);
 }
 await sleep(1200);
 // loadContext は起動時に1回。テストでは再ログインで読み直す
@@ -157,12 +164,21 @@ t = load('teacher.html'); await sleep(900);
 {
   const c1 = t.$('#req-1'), c3 = t.$('#req-3');
   ok('田中（数学42点）→ 1行版に点数と基礎', c1.querySelector('.assist.mini') && c1.querySelector('.assist.mini').textContent.includes('42点') && c1.querySelector('.assist.mini').textContent.includes('基礎'), c1.querySelector('.assist.mini') && c1.querySelector('.assist.mini').textContent);
-  ok('田中にテキスト候補（1行版）', c1.querySelector('.assist.mini').textContent.includes('📚'));
+  ok('田中に印刷候補（1行版・ドライブの教材）', c1.querySelector('.assist.mini').textContent.includes('🖨 中2数学 一次関数 類題演習プリント'), c1.querySelector('.assist.mini').textContent);
   ok('佐藤（92点・目標95・依頼は基礎）→ 応用＋注意（1行版）', c3.querySelector('.assist.mini').textContent.includes('応用') && c3.querySelector('.assist.mini').textContent.includes('⚠') && c3.querySelector('.assist.mini').classList.contains('warn'), c3.querySelector('.assist.mini').textContent);
   ok('質問カードにはブロックなし', !t.$('#req-2').querySelector('.assist'));
   t.click('詳細', c1); await sleep(100);
   const full = t.$('#req-1').querySelector('.assist:not(.mini)');
   ok('詳細を開くと点数の全文（前回点・候補名）', full && full.textContent.includes('直近 数学42点') && full.textContent.includes('前回48') && /フォレスタ ドリル|Keyワーク|iワーク テキスト|必修テキスト/.test(full.textContent), full && full.textContent);
+  const sgBox = t.$('#req-1').querySelector('.print-sg');
+  ok('詳細に印刷候補のリンク（中2・一次関数のみ、中1は出ない）', sgBox && sgBox.querySelector('a[href*="/m1/"]') && !sgBox.querySelector('a[href*="/m3/"]') && !sgBox.querySelector('a[href*="/m4/"]'), sgBox && sgBox.textContent);
+  ok('類題演習が先頭', sgBox.querySelector('ul.mats li a').getAttribute('href').includes('/m1/'));
+  t.click('📂 ほかをさがす', t.$('#req-1')); await sleep(100);
+  const ms = t.$('.modal');
+  ok('教材さがし（数学・中2・一次関数で2件）', ms && ms.textContent.includes('2件'), ms && ms.querySelector('#msList').textContent);
+  t.click('難問', ms); await sleep(50);
+  ok('難問で絞ると1件', ms.querySelector('#msList').textContent.includes('1件') && ms.querySelector('#msList').textContent.includes('発展問題'));
+  t.click('閉じる', ms); await sleep(50);
   const dt = t.$('#req-1').querySelector('table.detail').textContent;
   ok('詳細に点数履歴・目標・テキスト候補・直近プリント', dt.includes('2026年度 1学期中間') && dt.includes('目標点') && dt.includes('テキスト候補') && dt.includes('直近のプリント'), dt.slice(0, 400));
   t.click('目標を設定', t.$('#req-1')); await sleep(100);
@@ -321,6 +337,11 @@ ok('名簿に追加', t.text().includes('新井 太郎'));
 const db = JSON.parse(storage.getItem('jh_local_db_v1'));
 ok('student_no は 学年_氏名', db.students.some((x) => x.student_no === '中3_新井太郎'));
 ok('既存の伊藤さくらは上書き（重複なし）', db.students.filter((x) => x.name === '伊藤 さくら').length === 1);
+ok('設定に印刷用の教材', t.text().includes('印刷用の教材（4件）'));
+t.setVal('#matFilter', '発展'); await sleep(50);
+ok('教材の絞り込み', t.$('#matRows').querySelectorAll('.matrow').length === 1);
+t.click('候補に出さない', t.$('#matRows')); await sleep(300);
+ok('候補に出さないにできる', t.$('#matRows .matrow').classList.contains('inactive') && JSON.parse(storage.getItem('jh_local_db_v1')).materials.find((m) => m.drive_id === 'm2').hidden === true);
 t.setVal('#rosterFilter', '新井'); await sleep(50);
 const visible = Array.from(t.w.document.querySelectorAll('#rosterTable tr[data-name]')).filter((tr) => tr.style.display !== 'none');
 ok('名簿の絞り込み', visible.length === 1 && visible[0].textContent.includes('新井 太郎'));

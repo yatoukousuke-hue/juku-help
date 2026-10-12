@@ -57,6 +57,7 @@
   let undoState = null, undoTimer = null;   // 直前の完了（元に戻す用）
   let doneRows = null;            // 過去日の完了一覧（読み込み結果）
   let recentPrints = [];          // 直近のプリント依頼
+  let materialsAll = [];          // 印刷用の教材（ドライブのファイル名とリンク）
   let ctxTimer = null;
   const firstOfMonth = (d) => ymd(new Date(d.getFullYear(), d.getMonth(), 1));
   const lastOfMonth = (d) => ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0));
@@ -214,7 +215,7 @@
     if (tab === 'done') return renderDone(body);
     const active = [filterRoom, filterKind === 'print' ? 'プリント' : filterKind === 'question' ? '質問' : '', filterGrade, filterSchool, filterSubject, sortMode === 'group' ? '学年→教科→単元' : ''].filter(Boolean);
     const open = filtersOpen || active.length > 0;
-    body.innerHTML = `<div class="filterbar"><button class="btn xs ${active.length ? 'soft' : 'ghost'}" id="fToggle">🔍 絞り込み${active.length ? '：' + active.map(esc).join('・') : ''} ${open ? '▲' : '▼'}</button>${active.length ? '<button class="btn xs ghost" id="fClear">解除</button>' : ''}<span class="spacer"></span><button class="btn xs ${selecting ? 'soft' : 'ghost'}" id="bSelect">☑ ${selecting ? '選ぶのをやめる' : 'まとめて選ぶ'}</button></div>
+    body.innerHTML = `<div class="filterbar"><button class="btn xs ${active.length ? 'soft' : 'ghost'}" id="fToggle">🔍 絞り込み${active.length ? '：' + active.map(esc).join('・') : ''} ${open ? '▲' : '▼'}</button>${active.length ? '<button class="btn xs ghost" id="fClear">解除</button>' : ''}<span class="spacer"></span>${materialsAll.length ? '<button class="btn xs ghost" id="bMat">📂 教材</button>' : ''}<button class="btn xs ${selecting ? 'soft' : 'ghost'}" id="bSelect">☑ ${selecting ? '選ぶのをやめる' : 'まとめて選ぶ'}</button></div>
       <div class="filters ${open ? '' : 'hidden'}">
         <select id="fRoom"><option value="">全教室</option>${C.CLASSROOMS.map((c) => `<option ${filterRoom === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
         <select id="fKind"><option value="">種類：全部</option><option value="question" ${filterKind === 'question' ? 'selected' : ''}>質問</option><option value="print" ${filterKind === 'print' ? 'selected' : ''}>プリント</option></select>
@@ -229,6 +230,7 @@
       <div id="groupBar"></div><div id="list"></div>`;
     $('#fToggle').onclick = () => { filtersOpen = !open; renderBody(); };
     $('#bSelect').onclick = () => { selecting = !selecting; picked.clear(); renderBody(); };
+    if ($('#bMat')) $('#bMat').onclick = () => openMaterialSearch(null);
     if ($('#fClear')) $('#fClear').onclick = () => { filterRoom = filterKind = filterGrade = filterSchool = filterSubject = ''; sortMode = 'time'; filterUrgent = false; filtersOpen = false; renderBody(); renderSummary(); };
     $('#fRoom').onchange = (e) => { filterRoom = e.target.value; renderList(); };
     $('#fKind').onchange = (e) => { filterKind = e.target.value; renderList(); };
@@ -358,13 +360,84 @@
     const um = unmetChecks(r);
     return um.length ? `<span class="flag" title="${esc(um.join('・'))}未">⚠ 確認まだ${um.length}</span>` : '';
   }
+  // ---- 印刷候補（ドライブの教材） ----
+  const CAT_JA = { intro: '導入', weak: '弱点補強', practice: '類題演習', test: 'テスト形式', hard: '難問' };
+  const CAT_ORDER = ['intro', 'weak', 'practice', 'test', 'hard'];
+  const PURPOSE_CAT = { point: 'intro', weak: 'weak', practice: 'practice', test: 'test' };
+  const unitTokens = (s) => String(s || '').toLowerCase().replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xFEE0)).split(/[、,・\/／\s　()（）\-〜~＝=]+/).filter((t) => t.length >= 2);
+  const shortTitle = (t) => String(t || '').replace(/\.(pdf|docx?|pptx?|jpe?g|png)$/i, '');
+  // 依頼に合う教材を点数づけして並べる。unitHit = 単元が合っている
+  function suggestMaterials(r, limit) {
+    if (r.kind !== 'print' || !materialsAll.length) return [];
+    const li = levelInfo(r);
+    const want = PURPOSE_CAT[r.purpose];
+    const wantHard = r.difficulty === 'advanced' || li.rec === 'advanced';
+    const weakKid = r.difficulty === 'basic' || li.rec === 'basic' || r.purpose === 'point';
+    const unitN = normUnit(r.unit_name);
+    const toks = unitTokens(r.unit_name);
+    const out = [];
+    for (const m of materialsAll) {
+      if (m.hidden) continue;
+      if (m.subject && m.subject !== r.subject) continue;
+      if (m.grades && m.grades.length && !m.grades.includes(r.grade)) continue;
+      let s = m.subject === r.subject ? 2 : 0;
+      if (m.grades && m.grades.includes(r.grade)) s += 3;
+      const hay = normUnit(m.unit) + '|' + normUnit(m.title) + '|' + normUnit(m.path);
+      let unitHit = false;
+      if (unitN && (hay.includes(unitN) || (normUnit(m.unit).length >= 2 && unitN.includes(normUnit(m.unit))))) { s += 6; unitHit = true; }
+      else if (toks.some((t) => hay.includes(t))) { s += 4; unitHit = true; }
+      const cats = m.categories || [];
+      if (want && cats.includes(want)) s += 4;
+      if (wantHard && cats.includes('hard')) s += 3;
+      if (weakKid && cats.includes('hard')) s -= 4;
+      if (weakKid && cats.includes('intro')) s += 1;
+      if (m.level && m.level === (r.difficulty || li.rec)) s += 1;
+      if (m.note === '解答') s -= 3;   // 解答は問題のあとに
+      out.push({ m, s, unitHit });
+    }
+    out.sort((a, b) => (b.unitHit - a.unitHit) || (b.s - a.s) || String(a.m.title).localeCompare(String(b.m.title), 'ja'));
+    return out.slice(0, limit || 5);
+  }
+  const catChips = (m) => CAT_ORDER.filter((c) => (m.categories || []).includes(c)).map((c) => `<span class="cat c-${c}">${CAT_JA[c]}</span>`).join('');
+  const matLink = (m) => `<a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(shortTitle(m.title))}</a>`;
+  function materialList(items) {
+    return `<ul class="mats">${items.map(({ m }) => `<li>${matLink(m)} ${m.note === '解答' ? '<span class="cat">解答</span>' : ''}${catChips(m)}${m.grades && m.grades.length ? `<span class="sub"> ${esc(m.grades.join('・'))}</span>` : ''}${m.path ? `<div class="sub">${esc(m.path)}</div>` : ''}</li>`).join('')}</ul>`;
+  }
+  // 教材さがし（自動の候補に無いとき）
+  function openMaterialSearch(r) {
+    const subj0 = r ? r.subject : '';
+    const q0 = r ? (r.unit_name || '') : '';
+    const bg = modal(`<h3>📂 教材をさがす</h3>
+      <div class="row"><select class="input" id="msSubj" style="width:auto"><option value="">全教科</option>${C.SUBJECTS.map((x) => `<option ${x === subj0 ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+      <select class="input" id="msGrade" style="width:auto"><option value="">全学年</option>${C.GRADES.map((g) => `<option ${r && r.grade === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select></div>
+      <input class="input mt" id="msQ" placeholder="単元名・ファイル名で検索" value="${esc(q0)}">
+      <div class="chips mt" id="msCats">${CAT_ORDER.map((c) => `<button class="chip" data-mc="${c}">${CAT_JA[c]}</button>`).join('')}</div>
+      <div id="msList" class="mt"></div>
+      <div class="row mt"><span class="spacer"></span><button class="btn ghost" id="msClose">閉じる</button></div>`);
+    const cats = new Set();
+    const draw = () => {
+      const subj = $('#msSubj', bg).value, grade = $('#msGrade', bg).value, toks = unitTokens($('#msQ', bg).value);
+      let list = materialsAll.filter((m) => !m.hidden && (!subj || m.subject === subj || !m.subject) && (!grade || !m.grades || !m.grades.length || m.grades.includes(grade)));
+      if (cats.size) list = list.filter((m) => [...cats].every((c) => (m.categories || []).includes(c)));
+      if (toks.length) list = list.filter((m) => { const hay = normUnit(m.unit) + '|' + normUnit(m.title) + '|' + normUnit(m.path); return toks.some((t) => hay.includes(t)); });
+      $('#msList', bg).innerHTML = list.length ? `<div class="small muted">${list.length}件${list.length > 60 ? '（上位60件を表示）' : ''}</div>` + materialList(list.slice(0, 60).map((m) => ({ m }))) : '<div class="muted small">見つかりません。教科・学年・検索語を変えてみてください。</div>';
+    };
+    ['msSubj', 'msGrade'].forEach((id) => { $('#' + id, bg).onchange = draw; });
+    $('#msQ', bg).addEventListener('input', draw);
+    $$('[data-mc]', bg).forEach((b) => b.onclick = () => { const c = b.dataset.mc; if (cats.has(c)) cats.delete(c); else cats.add(c); b.classList.toggle('selected'); draw(); });
+    $('#msClose', bg).onclick = () => bg.remove();
+    draw();
+  }
+
   // 初期表示用の1行版（点数→レベル・テキスト・前回）。注意があるときだけ赤
   function assistCompact(r) {
     if (r.kind !== 'print') return '';
     const li = levelInfo(r); const rt = recommendTexts(r, li.rec); const ps = priorSummary(r);
     const parts = [];
     if (li.cur || li.target != null) parts.push(`📈 ${li.cur ? li.cur.value + '点' : ''}${li.target != null ? '/目標' + li.target : ''}${li.rec ? '→' + LEVEL_JA[li.rec] : ''}`);
-    if (rt.picked.length) parts.push(`📚 ${esc(rt.picked[0].name)}${rt.picked.length > 1 ? ' ほか' : ''}`);
+    const sg = suggestMaterials(r, 5).filter((x) => x.unitHit);
+    if (sg.length) parts.push(`🖨 ${esc(shortTitle(sg[0].m.title))}${sg.length > 1 ? ` ほか${sg.length - 1}` : ''}`);
+    else if (rt.picked.length) parts.push(`📚 ${esc(rt.picked[0].name)}${rt.picked.length > 1 ? ' ほか' : ''}`);
     if (ps.last) parts.push(`📄 ${ps.today ? '今日' + (ps.today + 1) + '枚目' : '前回' + fmtDate(ps.last.created_at)}${ps.ask ? '（さっきのやった？）' : ''}`);
     if (!parts.length) return '';
     const warn = li.warns.length || ps.ask;
@@ -545,6 +618,7 @@
     if (act === 'detail') { if (expanded.has(id)) expanded.delete(id); else expanded.add(id); return renderList(); }
     if (act === 'slip') return openSlipModal(r);
     if (act === 'targets') return openTargetsModal(r);
+    if (act === 'msearch') return openMaterialSearch(r);
     if (act === 'group') { filterKind = 'print'; filterGrade = r.grade; filterSubject = r.subject; const sc = schoolOf(r); filterSchool = !sc ? '' : (C.SCHOOLS.includes(sc) ? sc : C.SCHOOL_OTHER); sortMode = 'group'; return renderBody(); }
     if (act === 'start') return doUpdate(id, 'start', tname, null, null);
     if (act === 'reopen') return doUpdate(id, 'reopen', null, null, null);
@@ -608,6 +682,7 @@
     vars.target = li.target != null ? String(li.target) : '未設定';
     vars.level = li.rec ? LEVEL_JA[li.rec] : '判定なし';
     vars.texts = rt.picked.slice(0, 3).map((m) => m.name).join('／') || 'なし';
+    vars.materials = suggestMaterials(r, 3).filter((x) => x.unitHit).map((x) => shortTitle(x.m.title)).join('／') || 'なし';
     return String(C.PRINT_SLIP_TEMPLATE || '').replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
   }
   function openTargetsModal(r) {
@@ -642,8 +717,8 @@
   // 名簿・点数・直近プリントをまとめて読む（カードのおすすめ表示に使う）
   async function loadContext() {
     try {
-      const [st, sc, rp] = await Promise.all([api.teacherStudents(pass), api.teacherScoresAll(pass), api.teacherRecentPrints(pass, C.RECENT_PRINT_DAYS || 14)]);
-      students = st; scoresAll = sc; recentPrints = rp;
+      const [st, sc, rp, mt] = await Promise.all([api.teacherStudents(pass), api.teacherScoresAll(pass), api.teacherRecentPrints(pass, C.RECENT_PRINT_DAYS || 14), api.teacherMaterials(pass).catch(() => [])]);
+      students = st; scoresAll = sc; recentPrints = rp; materialsAll = mt || [];
       if (['waiting', 'in_progress'].includes(tab)) renderList();
     } catch (_) {}
   }
@@ -714,6 +789,13 @@
     parts.push(`<div class="assist-row">📈 ${scoreTxt}${li.rec && r.difficulty && li.rec !== r.difficulty ? `<span class="sub">（依頼は${esc(DIFF_LABEL[r.difficulty] || '')}）</span>` : ''}</div>`);
     if (rt.picked.length) parts.push(`<div class="assist-row">📚 ${LEVEL_JA[rt.level]}：<b>${rt.picked.slice(0, 3).map((m) => esc(m.name)).join('／')}</b>${rt.picked.length > 3 ? `<span class="sub"> ほか${rt.picked.length - 3}</span>` : ''}</div>`);
     if (li.warns.length) parts.push(`<div class="assist-row warn">⚠ ${li.warns.map(esc).join('。')}</div>`);
+    if (materialsAll.length) {
+      const sg = suggestMaterials(r, 8);
+      const hits = sg.filter((x) => x.unitHit), others = sg.filter((x) => !x.unitHit).slice(0, 3);
+      parts.push(`<div class="assist-row print-sg">🖨 <b>印刷候補</b>（${esc(CAT_JA[PURPOSE_CAT[r.purpose]] || '')}${r.difficulty === 'advanced' || li.rec === 'advanced' ? '・難問も' : ''}）<button class="btn xs ghost" data-act="msearch" data-id="${r.id}">📂 ほかをさがす</button>
+        ${hits.length ? materialList(hits) : '<div class="sub">単元に合う教材が見つかりません</div>'}
+        ${!hits.length && others.length ? `<div class="sub" style="margin-top:4px">同じ教科・学年の教材：</div>${materialList(others)}` : ''}</div>`);
+    }
     if (ps.last) parts.push(`<div class="assist-row ${ps.ask ? 'warn' : ''}">📄 前回：${esc(shortPrint(ps.last))}${ps.today ? `　<b>今日${ps.today + 1}枚目</b>` : ''}${ps.week >= 3 ? `　<b>7日で${ps.week + 1}枚目</b>` : ''}${ps.ask ? '　→ 「さっきのプリントやった？」' : ''}</div>`);
     return `<div class="assist">${parts.join('')}</div>`;
   }
@@ -908,6 +990,20 @@
         ${students.map((s) => `<tr data-name="${esc(s.name)}" class="${s.active ? '' : 'inactive'}"><td>${esc(s.grade)}</td><td>${esc(s.name)}</td><td>${esc(s.school)}</td><td>${s.active ? `<button class="btn xs ghost" data-deact="${s.id}">無効にする</button>` : `<span class="muted">無効</span> <button class="btn xs soft" data-react="${s.id}">戻す</button>`}</td></tr>`).join('')}</table>
       </div>
       <div class="card">
+        <h2>印刷用の教材（${materialsAll.filter((m) => !m.hidden).length}件）</h2>
+        <p class="small muted">ドライブの教材のファイル名とリンクだけを入れています（中身や個人情報は入れていません）。プリント依頼のカードに「🖨 印刷候補」として出ます。分類が違うものは下で直せます（直したものは取り込み直しても上書きされません）。</p>
+        <div class="small">${C.SUBJECTS.filter((x) => materialsAll.some((m) => m.subject === x && !m.hidden)).map((x) => `${esc(x)} ${materialsAll.filter((m) => m.subject === x && !m.hidden).length}`).join('・') || '（まだありません）'}</div>
+        <input class="input mt" id="matFilter" placeholder="ファイル名・単元で絞り込み">
+        <div id="matRows" class="mt"></div>
+        <details class="mt"><summary class="small" style="cursor:pointer;font-weight:700">＋ 教材を手で追加する</summary>
+          <input class="input mt" id="maTitle" placeholder="名前（例: 中2数学 一次関数 類題プリント）">
+          <input class="input mt" id="maUrl" placeholder="リンク（ドライブの共有リンクなど）">
+          <div class="row mt"><select class="input" id="maSubj" style="width:auto">${C.SUBJECTS.map((x) => `<option>${esc(x)}</option>`).join('')}</select><select class="input" id="maGrade" style="width:auto"><option value="">全学年</option>${C.GRADES.map((g) => `<option>${esc(g)}</option>`).join('')}</select><input class="input" id="maUnit" placeholder="単元" style="flex:1"></div>
+          <div class="chips mt" id="maCats">${CAT_ORDER.map((c) => `<button class="chip" data-mac="${c}">${CAT_JA[c]}</button>`).join('')}</div>
+          <button class="btn mt" id="maAdd">追加する</button>
+        </details>
+      </div>
+      <div class="card">
         <h2>定期テストの点数の取り込み（講師だけが見られます）</h2>
         <p class="small muted">テスト名（例: 2026.3 = 2026年度 2学期中間）を入れ、スプレッドシートの「氏名・英語・数学・国語・理科・社会」の列をコピーして貼り付けてください。名簿の氏名と一致する行だけ取り込みます（空白の違いは無視）。</p>
         <div class="row"><input class="input" id="scPeriod" placeholder="2026.3" style="width:110px"><input class="input" id="scLabel" placeholder="表示名（例: 2026年度 2学期中間）" style="flex:1"></div>
@@ -938,6 +1034,36 @@
         .filter((c) => c.length >= 1 && c[0])
         .filter((c) => !/^(氏名|名前|生徒名|name)/i.test(c[0]))
         .map((c) => ({ student_no: `${grade}_${c[0].replace(/[\s　]/g, '')}`, name: c[0], grade, school: c[1] || '' }));
+    };
+    const drawMats = () => {
+      const toks = unitTokens($('#matFilter').value);
+      let list = materialsAll.slice();
+      if (toks.length) list = list.filter((m) => { const hay = normUnit(m.unit) + '|' + normUnit(m.title) + '|' + normUnit(m.path); return toks.every((t) => hay.includes(t)); });
+      $('#matRows').innerHTML = (list.length > 40 ? `<div class="small muted">${list.length}件中 40件を表示（絞り込んでください）</div>` : '') + list.slice(0, 40).map((m) => `<div class="matrow ${m.hidden ? 'inactive' : ''}" data-mid="${m.id}">
+          <div>${matLink(m)} <span class="sub">${esc(m.subject || '教科なし')}${m.grades && m.grades.length ? '・' + esc(m.grades.join('・')) : ''}${m.unit ? '・' + esc(m.unit) : ''}${m.locked ? '・手直し済' : ''}</span></div>
+          <div class="chips">${CAT_ORDER.map((c) => `<button class="chip ${(m.categories || []).includes(c) ? 'selected' : ''}" data-mcat="${c}">${CAT_JA[c]}</button>`).join('')}<button class="chip ${m.hidden ? 'selected danger' : ''}" data-mhide="1">${m.hidden ? '候補に出さない中' : '候補に出さない'}</button></div>
+        </div>`).join('');
+      $$('#matRows [data-mcat]').forEach((b) => b.onclick = async () => {
+        const id = Number(b.closest('.matrow').dataset.mid); const m = materialsAll.find((x) => x.id === id); const set = new Set(m.categories || []);
+        if (set.has(b.dataset.mcat)) set.delete(b.dataset.mcat); else set.add(b.dataset.mcat);
+        try { Object.assign(m, await api.teacherSaveMaterial(pass, id, { categories: CAT_ORDER.filter((c) => set.has(c)) })); drawMats(); } catch (e) { toast(errorText(e), 'error'); }
+      });
+      $$('#matRows [data-mhide]').forEach((b) => b.onclick = async () => {
+        const id = Number(b.closest('.matrow').dataset.mid); const m = materialsAll.find((x) => x.id === id);
+        try { Object.assign(m, await api.teacherSaveMaterial(pass, id, { hidden: !m.hidden })); drawMats(); } catch (e) { toast(errorText(e), 'error'); }
+      });
+    };
+    $('#matFilter').addEventListener('input', drawMats);
+    drawMats();
+    const maCats = new Set();
+    $$('[data-mac]').forEach((b) => b.onclick = () => { const c = b.dataset.mac; if (maCats.has(c)) maCats.delete(c); else maCats.add(c); b.classList.toggle('selected'); });
+    $('#maAdd').onclick = async () => {
+      const title = $('#maTitle').value.trim(), url = $('#maUrl').value.trim();
+      if (!title || !/^https?:\/\//.test(url)) return toast('名前と、https:// で始まるリンクを入れてください', 'error');
+      try {
+        const m = await api.teacherSaveMaterial(pass, null, { title, url, subject: $('#maSubj').value, grades: $('#maGrade').value ? [$('#maGrade').value] : [], unit: $('#maUnit').value.trim(), categories: CAT_ORDER.filter((c) => maCats.has(c)) });
+        materialsAll.push(m); toast('追加しました', 'ok'); renderSettings(body);
+      } catch (e) { toast(errorText(e), 'error'); }
     };
     $('#rosterFilter').addEventListener('input', (e) => { const q = e.target.value.replace(/[\s　]/g, ''); $$('#rosterTable tr[data-name]').forEach((tr) => { tr.style.display = !q || tr.dataset.name.replace(/[\s　]/g, '').includes(q) ? '' : 'none'; }); });
     $$('[data-deact]').forEach((b) => b.onclick = async () => {

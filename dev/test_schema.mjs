@@ -193,6 +193,31 @@ ok('inactive student hidden from students list', !(await rpcSet('list_students',
 const on = (await rpcSet('teacher_set_student_active', { p_pass: PASS, p_student_id: hanako.id, p_active: true }))[0];
 ok('student reactivated', on.active === true);
 
+console.log('\n-- 印刷用教材');
+const mi = await rpc('teacher_import_materials', { p_pass: PASS, p_rows: JSON.stringify([
+  { drive_id: 'f1', title: '中2数学 一次関数 基本プリント', url: 'https://drive.google.com/file/d/f1/view', subject: '数学', grades: ['中2'], unit: '一次関数', categories: ['intro', 'practice'], level: 'basic', path: '教材 > 数学' },
+  { drive_id: 'f2', title: '中2数学 一次関数 確認テスト', url: 'https://drive.google.com/file/d/f2/view', subject: '数学', grades: ['中2'], unit: '一次関数', categories: ['test'], level: 'standard', path: '教材 > 数学' },
+  { drive_id: '', title: 'bad', url: 'x' },
+]) });
+ok('materials imported 2 (bad row skipped)', mi[0].imported === 2, JSON.stringify(mi));
+let mats = await rpcSet('teacher_materials', { p_pass: PASS });
+ok('materials listed', mats.length === 2 && mats.find((x) => x.drive_id === 'f1').categories.includes('intro'));
+await expectError('materials need pass', () => rpcSet('teacher_materials', { p_pass: 'x' }), 'BAD_PASS');
+const f2 = mats.find((x) => x.drive_id === 'f2');
+const ed = (await rpcSet('teacher_save_material', { p_pass: PASS, p_id: f2.id, p_fields: JSON.stringify({ categories: ['test', 'hard'], hidden: false }) }))[0];
+ok('edit locks and saves categories', ed.locked === true && ed.categories.includes('hard'));
+await rpc('teacher_import_materials', { p_pass: PASS, p_rows: JSON.stringify([{ drive_id: 'f2', title: '中2数学 一次関数 確認テスト(改)', url: 'https://drive.google.com/file/d/f2/view', subject: '数学', grades: ['中2'], unit: '一次関数', categories: ['test'], level: 'standard', path: '教材' }]) });
+mats = await rpcSet('teacher_materials', { p_pass: PASS });
+const f2b = mats.find((x) => x.drive_id === 'f2');
+ok('re-import keeps locked categories but updates title', f2b.categories.includes('hard') && f2b.title.endsWith('(改)'), JSON.stringify(f2b));
+const man = (await rpcSet('teacher_save_material', { p_pass: PASS, p_id: null, p_fields: JSON.stringify({ title: '手作り 英語 不定詞', url: 'https://example.com/a.pdf', subject: '英語', grades: ['中2'], unit: '不定詞', categories: ['weak'] }) }))[0];
+ok('manual material added', man.source === 'manual' && man.locked === true && man.drive_id === null);
+const hid = (await rpcSet('teacher_save_material', { p_pass: PASS, p_id: man.id, p_fields: JSON.stringify({ hidden: true }) }))[0];
+ok('hide material', hid.hidden === true);
+await db.exec('set role anon');
+await expectError('anon cannot read print_materials', () => db.query('select * from print_materials'), 'permission denied');
+await db.exec('reset role');
+
 console.log('\n-- 合言葉変更');
 await expectError('too short', () => rpc('teacher_set_pass', { p_pass: PASS, p_new: '12' }), 'PASS_TOO_SHORT');
 await rpc('teacher_set_pass', { p_pass: PASS, p_new: 'newpass' });

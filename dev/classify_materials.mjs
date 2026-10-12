@@ -32,17 +32,22 @@ function detectGrades(text) {
   if (/中3|中学3|3年|中三|受験|入試|北辰/.test(t)) g.add('中3');
   return [...g];
 }
-const CATS = {
-  intro: /導入|基礎|基本|要点|まとめ|ポイント|入門|はじめ|やさしい|ステップ|必修|解説|教科書ガイド|確認問題/,
-  weak: /弱点|補強|復習|苦手|総復習|おさらい|チェック|やり直し|解き直し/,
-  practice: /演習|練習|類題|ドリル|問題集|トレーニング|ワーク|プリント|反復|計算|問題/,
-  test: /テスト|小テスト|確認テスト|定期|模試|北辰|過去問|入試|実力|模擬|期末|中間|学年末|検定/,
-  hard: /発展|応用|難問|難しい|ハイレベル|上位|挑戦|最難|選抜|トップ|ゴール|sirius|シリウス|プラス.?黒|黒|入試|特訓|TOP|ハイ/i,
-};
-function detectCategories(text) {
-  const cats = Object.entries(CATS).filter(([, re]) => re.test(text)).map(([k]) => k);
-  if (!cats.length) cats.push('practice');
-  return cats;
+// 用途の判定（フォルダの性格 → ファイル名の順に見る）
+// intro=苦手な子の導入 / weak=弱点補強 / practice=類題演習 / test=テスト形式 / hard=難しい問題
+function detectCategories(path, title) {
+  const t = path + ' ' + title;
+  const c = new Set();
+  if (/北辰/.test(t)) c.add('test');
+  if (/過去問|入試問題|県立入試|公立入試|入試リハ|予想問題|追検査|受験問題/.test(t)) { c.add('test'); if (/学校選択|（選択）|\(選択\)|選択問題/.test(title)) c.add('hard'); }
+  if (/Eテスト|確認テスト|単元テスト|単元確認|小テスト|チェックテスト|単語テスト|熟語テスト|プレ中間|プレ期末|はじめての定期テスト|テスト$|テスト\./.test(t)) c.add('test');
+  if (/Eテスト|確認テスト|単元確認|単元テスト/.test(t)) c.add('weak');
+  if (/璧問|壁問|定期テスト対策/.test(t)) { c.add('test'); c.add('practice'); }
+  if (/必修|まとめ|要点|ポイント|基礎|基本|導入|入門|ガイド|合格テキスト|文法テキスト|ブロッコリー|書き方|勉強法/.test(t)) c.add('intro');
+  if (/復習|総復習|補強|弱点|苦手|必修スタディ|おさらい|やり直し|品詞分解|ブロッコリー|反復/.test(t)) c.add('weak');
+  if (/演習|練習|類題|ドリル|問題集|トレーニング|ワーク|プリント|並べ替え|練成|特訓|問題編|長文|英単語|熟語|品詞分解/.test(t)) c.add('practice');
+  if (/発展|応用|難問|ハイレベル|上位|挑戦|最難|思考力|筑坂|お茶の水|駿台|星野|学校選択|入試小問|入試完成|sirius|シリウス|ゴール/i.test(t)) c.add('hard');
+  if (!c.size) c.add('practice');
+  return [...c];
 }
 const NOISE = /\.(pdf|docx?|pptx?|jpe?g|png|heic)$|中[123]|中学[123]年?|[123]年生?|英語|数学|国語|理科|社会|導入|基礎|基本|演習|練習|類題|プリント|テスト|問題|解答|解説|答え|コピー|スキャン|scan|_|\(\d+\)|^\d+$|\d{4}[-./]?\d{1,2}[-./]?\d{0,2}/gi;
 function detectUnit(title) {
@@ -50,22 +55,31 @@ function detectUnit(title) {
   return t.length >= 2 ? t.slice(0, 40) : '';
 }
 
+// 名簿の生徒名（手元だけのファイル）を含むファイル名は除外
+let rosterNames = [];
+try { rosterNames = JSON.parse(readFileSync('dev/roster_import.json', 'utf8')).map((s) => String(s.name).replace(/[\s　]/g, '')).filter((n) => n.length >= 2); } catch (_) {}
+const hasStudentName = (t) => { const n = t.replace(/[\s　]/g, ''); return rosterNames.some((x) => n.includes(x)); };
+// 生徒に配るものではない資料（正答率表・偏差値表・手引き・答案用紙など）は候補に出さない
+const NOT_PRINT = /正答率|偏差値|度数分布|成績表|手引|分析|講評|集計|平均点|得点分布/;
+
 const rows = [];
-let skipped = 0;
+let skipped = 0, nameSkipped = 0;
 for (const f of src) {
   const path = (f.path || []).join(' > ');
   const all = z2h(path + ' ' + f.title);
   if (PRIVATE.test(all)) { skipped++; continue; }
+  if (hasStudentName(path + f.title)) { nameSkipped++; continue; }
   const subject = detectSubject(z2h(path), z2h(f.title));
   const grades = detectGrades(all);
-  const categories = detectCategories(all);
-  const answer = /解答|答え|解説|answer/i.test(f.title);
-  const level = categories.includes('hard') ? 'advanced' : categories.includes('intro') ? 'basic' : 'standard';
-  rows.push({ drive_id: f.id, title: f.title, url: f.url, subject, grades, unit: detectUnit(f.title), categories, level, path, note: answer ? '解答' : '' });
+  const categories = detectCategories(z2h(path), z2h(f.title));
+  const answer = /解答|答え|解説|answer|マークシート/i.test(f.title);
+  const level = categories.includes('hard') ? 'advanced' : (categories.includes('intro') && !categories.includes('test')) ? 'basic' : 'standard';
+  const notPrint = NOT_PRINT.test(f.title);
+  rows.push({ drive_id: f.id, title: f.title, url: f.url, subject, grades, unit: detectUnit(f.title), categories, level, path, note: notPrint ? '資料' : answer ? '解答' : '', hidden: notPrint });
 }
 writeFileSync('dev/drive_materials_rows.json', JSON.stringify(rows, null, 1));
 const count = (k) => { const m = {}; rows.forEach((r) => { const v = typeof k === 'function' ? k(r) : r[k]; (Array.isArray(v) ? (v.length ? v : ['(なし)']) : [v || '(なし)']).forEach((x) => { m[x] = (m[x] || 0) + 1; }); }); return Object.entries(m).sort((a, b) => b[1] - a[1]).map(([a, b]) => `${a}:${b}`).join('  '); };
-console.log('rows', rows.length, '| privacy-skipped', skipped);
+console.log('rows', rows.length, '| privacy-skipped', skipped, '| student-name-skipped', nameSkipped, '| not-for-print (hidden)', rows.filter((r) => r.hidden).length);
 console.log('subject', count('subject'));
 console.log('grades', count('grades'));
 console.log('categories', count('categories'));
@@ -75,8 +89,9 @@ if (process.argv.includes('--upload')) {
   const h = { apikey: 'sb_publishable_eDlgtQQ5lt9zHmmZELZ_LA_P50PFTYW', 'Content-Type': 'application/json' };
   const pass = process.env.JH_PASS || 'sensei';
   let total = 0;
-  for (let i = 0; i < rows.length; i += 300) {
-    const r = await fetch('https://lwrjktjccutdhticabsi.supabase.co/rest/v1/rpc/teacher_import_materials', { method: 'POST', headers: h, body: JSON.stringify({ p_pass: pass, p_rows: rows.slice(i, i + 300) }) });
+  const up = rows.filter((r) => !r.hidden);
+  for (let i = 0; i < up.length; i += 300) {
+    const r = await fetch('https://lwrjktjccutdhticabsi.supabase.co/rest/v1/rpc/teacher_import_materials', { method: 'POST', headers: h, body: JSON.stringify({ p_pass: pass, p_rows: up.slice(i, i + 300) }) });
     const j = await r.json(); if (!r.ok) { console.log('upload error', r.status, JSON.stringify(j)); process.exit(1); }
     total += j.imported;
   }

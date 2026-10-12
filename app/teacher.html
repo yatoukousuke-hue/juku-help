@@ -364,7 +364,17 @@
   const CAT_JA = { intro: '導入', weak: '弱点補強', practice: '類題演習', test: 'テスト形式', hard: '難問' };
   const CAT_ORDER = ['intro', 'weak', 'practice', 'test', 'hard'];
   const PURPOSE_CAT = { point: 'intro', weak: 'weak', practice: 'practice', test: 'test' };
-  const unitTokens = (s) => String(s || '').toLowerCase().replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xFEE0)).split(/[、,・\/／\s　()（）\-〜~＝=]+/).filter((t) => t.length >= 2);
+  // 照合用の正規化: 全角数字→半角、「一次」→「1次」、よくある書き方の違いをそろえる
+  const KANJI_NUM = { '一': '1', '二': '2', '三': '3' };
+  const UNIT_ALIAS = [[/連立(?!方程式)/g, '連立方程式'], [/酸アルカリ|酸・アルカリ|酸とアルカリ/g, '酸アルカリ中和'], [/ヒトのからだ|人の体|人体/g, '動物のからだ'], [/科学変化/g, '化学変化'], [/かなづかい/g, '仮名遣い'], [/世界の諸地域/g, '世界地理'], [/日本の諸地域/g, '日本地理'], [/2乗に比例|二乗に比例/g, '2乗に比例関数']];
+  const matchNorm = (s) => { let t = String(s || '').replace(/[\s　]/g, '').replace(/[０-９Ａ-Ｚａ-ｚ]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xFEE0)).toLowerCase().replace(/([一二三])(次|元)/g, (m, a, b) => KANJI_NUM[a] + b); for (const [re, to] of UNIT_ALIAS) t = t.replace(re, to); return t; };
+  const STOP_TOK = new Set(['利用', '計算', '問題', 'プリント', '必修', '基本', '応用', '練習', '演習', '復習', 'テスト', 'まで', 'から', 'ワーク', '教科書', '範囲', '全部', 'まとめ']);
+  const unitTokens = (s) => {
+    const toks = matchNorm(s).split(/[、,・\/／()（）\-〜~＝=のとや]+/).filter((t) => t.length >= 2 && !STOP_TOK.has(t) && !/^p?\d+$/.test(t));
+    const units = [...String(s || '').toLowerCase().replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xFEE0)).matchAll(/unit\s*(\d+)/g)].map((m) => 'unit' + m[1]);
+    return [...new Set(toks.concat(units))];
+  };
+  const matHay = (m) => matchNorm(m.unit) + '|' + matchNorm(m.title) + '|' + matchNorm(m.path);
   const shortTitle = (t) => String(t || '').replace(/\.(pdf|docx?|pptx?|jpe?g|png)$/i, '');
   // 依頼に合う教材を点数づけして並べる。unitHit = 単元が合っている
   function suggestMaterials(r, limit) {
@@ -373,7 +383,7 @@
     const want = PURPOSE_CAT[r.purpose];
     const wantHard = r.difficulty === 'advanced' || li.rec === 'advanced';
     const weakKid = r.difficulty === 'basic' || li.rec === 'basic' || r.purpose === 'point';
-    const unitN = normUnit(r.unit_name);
+    const unitN = matchNorm(r.unit_name);
     const toks = unitTokens(r.unit_name);
     const out = [];
     for (const m of materialsAll) {
@@ -382,9 +392,9 @@
       if (m.grades && m.grades.length && !m.grades.includes(r.grade)) continue;
       let s = m.subject === r.subject ? 2 : 0;
       if (m.grades && m.grades.includes(r.grade)) s += 3;
-      const hay = normUnit(m.unit) + '|' + normUnit(m.title) + '|' + normUnit(m.path);
+      const hay = matHay(m);
       let unitHit = false;
-      if (unitN && (hay.includes(unitN) || (normUnit(m.unit).length >= 2 && unitN.includes(normUnit(m.unit))))) { s += 6; unitHit = true; }
+      if (unitN && (hay.includes(unitN) || (matchNorm(m.unit).length >= 3 && unitN.includes(matchNorm(m.unit))))) { s += 6; unitHit = true; }
       else if (toks.some((t) => hay.includes(t))) { s += 4; unitHit = true; }
       const cats = m.categories || [];
       if (want && cats.includes(want)) s += 4;
@@ -419,7 +429,7 @@
       const subj = $('#msSubj', bg).value, grade = $('#msGrade', bg).value, toks = unitTokens($('#msQ', bg).value);
       let list = materialsAll.filter((m) => !m.hidden && (!subj || m.subject === subj || !m.subject) && (!grade || !m.grades || !m.grades.length || m.grades.includes(grade)));
       if (cats.size) list = list.filter((m) => [...cats].every((c) => (m.categories || []).includes(c)));
-      if (toks.length) list = list.filter((m) => { const hay = normUnit(m.unit) + '|' + normUnit(m.title) + '|' + normUnit(m.path); return toks.some((t) => hay.includes(t)); });
+      if (toks.length) list = list.filter((m) => { const hay = matHay(m); return toks.some((t) => hay.includes(t)); });
       $('#msList', bg).innerHTML = list.length ? `<div class="small muted">${list.length}件${list.length > 60 ? '（上位60件を表示）' : ''}</div>` + materialList(list.slice(0, 60).map((m) => ({ m }))) : '<div class="muted small">見つかりません。教科・学年・検索語を変えてみてください。</div>';
     };
     ['msSubj', 'msGrade'].forEach((id) => { $('#' + id, bg).onchange = draw; });
@@ -1038,7 +1048,7 @@
     const drawMats = () => {
       const toks = unitTokens($('#matFilter').value);
       let list = materialsAll.slice();
-      if (toks.length) list = list.filter((m) => { const hay = normUnit(m.unit) + '|' + normUnit(m.title) + '|' + normUnit(m.path); return toks.every((t) => hay.includes(t)); });
+      if (toks.length) list = list.filter((m) => { const hay = matHay(m); return toks.every((t) => hay.includes(t)); });
       $('#matRows').innerHTML = (list.length > 40 ? `<div class="small muted">${list.length}件中 40件を表示（絞り込んでください）</div>` : '') + list.slice(0, 40).map((m) => `<div class="matrow ${m.hidden ? 'inactive' : ''}" data-mid="${m.id}">
           <div>${matLink(m)} <span class="sub">${esc(m.subject || '教科なし')}${m.grades && m.grades.length ? '・' + esc(m.grades.join('・')) : ''}${m.unit ? '・' + esc(m.unit) : ''}${m.locked ? '・手直し済' : ''}</span></div>
           <div class="chips">${CAT_ORDER.map((c) => `<button class="chip ${(m.categories || []).includes(c) ? 'selected' : ''}" data-mcat="${c}">${CAT_JA[c]}</button>`).join('')}<button class="chip ${m.hidden ? 'selected danger' : ''}" data-mhide="1">${m.hidden ? '候補に出さない中' : '候補に出さない'}</button></div>

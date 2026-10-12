@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f766e">
+<meta name="robots" content="noindex">
+<title>定期テスト予想問題</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  /* ---- 操作パネル ---- */
+  .ctl .row > * { flex: 1 1 140px; }
+  .ctl select, .ctl input { padding: 10px; }
+  .unit-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; max-height: 160px; overflow: auto; }
+  .unit-chips .chip { padding: 6px 10px; font-size: .85rem; min-width: 0; }
+  .unit-chips .chip .n { color: var(--muted); font-weight: 400; margin-left: 4px; }
+  .note { font-size: .8rem; color: var(--muted); }
+
+  /* ---- A4 の紙（北辰テストに近い見た目） ---- */
+  .paper-wrap { overflow-x: auto; padding: 4px 0 24px; }
+  .paper { width: 210mm; min-height: 297mm; margin: 0 auto 16px; background: #fff; color: #111; box-shadow: 0 2px 14px rgba(0,0,0,.15);
+    padding: 12mm 13mm; box-sizing: border-box; font-family: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", "Noto Serif JP", serif; font-size: 10.5pt; line-height: 1.6; position: relative; }
+  .paper .head { display: flex; align-items: flex-end; justify-content: space-between; border-bottom: 2.5px solid #111; padding-bottom: 2mm; margin-bottom: 4mm; }
+  .paper .head .ttl { font-family: "Yu Gothic", "Hiragino Sans", sans-serif; font-weight: 900; font-size: 15pt; letter-spacing: .04em; }
+  .paper .head .sub { font-size: 9pt; }
+  .paper .name { display: flex; gap: 6mm; font-size: 9.5pt; margin-bottom: 4mm; }
+  .paper .name span { border-bottom: 1px solid #111; min-width: 14mm; display: inline-block; }
+  .paper .name .nm { min-width: 55mm; }
+  .daimon { margin-bottom: 4.5mm; break-inside: avoid; }
+  .daimon .dt { display: flex; align-items: flex-start; gap: 3mm; margin-bottom: 1.5mm; }
+  .daimon .no { flex: none; display: inline-grid; place-items: center; width: 7mm; height: 7mm; background: #111; color: #fff; font-family: "Yu Gothic", sans-serif; font-weight: 900; font-size: 11pt; }
+  .daimon .lead { font-weight: 700; }
+  .sq { display: grid; grid-template-columns: 9mm 1fr; margin: 1.2mm 0 1.2mm 4mm; break-inside: avoid; }
+  .sq .k { font-weight: 700; }
+  .sq .q { white-space: pre-wrap; }
+  .sq .fig { margin: 1.5mm 0; }
+  .sq .fig svg { max-width: 70mm; max-height: 45mm; }
+  .sq .ans-space { border: 1px solid #555; height: 9mm; margin-top: 1mm; width: 70%; }
+  .sq .ans-space.tall { height: 18mm; width: 100%; }
+  .paper .foot { position: absolute; bottom: 7mm; left: 13mm; right: 13mm; font-size: 8pt; color: #555; display: flex; justify-content: space-between; }
+  .ans .sq .q { color: #b91c1c; font-weight: 700; }
+  .teacher-only { font-family: var(--font); font-size: .78rem; color: var(--muted); }
+  .star { color: #d97706; font-family: var(--font); font-size: .75rem; margin-left: 2mm; }
+  .src { margin: 0 auto; width: 210mm; max-width: 100%; }
+
+  @media print {
+    @page { size: A4; margin: 0; }
+    body { background: #fff; }
+    .noprint, .demo-banner, #toast { display: none !important; }
+    .app { padding: 0; max-width: none; }
+    .paper-wrap { padding: 0; overflow: visible; }
+    .paper { box-shadow: none; margin: 0; page-break-after: always; }
+    .paper:last-child { page-break-after: auto; }
+    .star { display: none; }
+    body:not(.with-answers) .paper.ans { display: none; }
+  }
+</style>
+</head>
+<body class="teacher">
+<div class="app wide" id="app"></div>
+
+<script src="config.js"></script>
+<script src="lib/supabase.js"></script>
+<script src="common.js"></script>
+<script>
+(function () {
+  'use strict';
+  const { $, $$, esc, todayYmd, errorText, toast, store, api } = window.JH;
+  const C = window.APP_CONFIG;
+  const app = $('#app');
+  const qs = new URLSearchParams(location.search);
+  let pass = store.get('jh_tpass', '');
+  let bank = [];
+  let seed = 1;
+  const st = { grade: qs.get('grade') || '', subject: qs.get('subject') || '', school: qs.get('school') || '', unit: qs.get('unit') || '', count: 10, mix: 'auto', withAnswers: true };
+
+  JH.demoBanner();
+
+  // ---- 単元名の照合（講師画面と同じ考え方：書き方の違いをそろえる） ----
+  const KANJI_NUM = { '一': '1', '二': '2', '三': '3' };
+  const norm = (s) => String(s || '').normalize('NFKC').replace(/[\s　]/g, '').toLowerCase().replace(/([一二三])(次|元)/g, (m, a, b) => KANJI_NUM[a] + b).replace(/連立(?!方程式)/g, '連立方程式');
+  const unitMatch = (bankUnit, want) => { const a = norm(bankUnit), b = norm(want); return !!b && (a === b || a.includes(b) || b.includes(a)); };
+
+  // ---- ログイン（講師画面と同じ合言葉） ----
+  function renderLogin(msg) {
+    app.innerHTML = `<div class="login-wrap"><div class="card"><h2>定期テスト予想問題</h2>
+      ${msg ? `<div class="small" style="color:var(--danger)">${esc(msg)}</div>` : ''}
+      <label class="lbl">合言葉</label><input class="input" id="pass" type="password">
+      <button class="btn block mt" id="go">入る</button></div></div>`;
+    const go = async () => { pass = $('#pass').value; try { await api.teacherLogin(pass); store.set('jh_tpass', pass); start(); } catch (e) { renderLogin(errorText(e)); } };
+    $('#go').onclick = go; $('#pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+  }
+
+  async function start() {
+    app.innerHTML = '<div class="card muted small">予想問題のストックを読み込み中…</div>';
+    try { bank = (await api.teacherExamQuestions(pass)).filter((q) => !q.hidden && q.kind !== 'pattern'); }
+    catch (e) { if (String(e.message).includes('BAD_PASS')) { store.del('jh_tpass'); return renderLogin('合言葉が変わったようです。'); } return (app.innerHTML = `<div class="card" style="color:var(--danger)">${esc(errorText(e))}</div>`); }
+    render();
+  }
+
+  // ---- 問題の選び方: よく出る順、同じパターンが続かないように、難易度のバランスを見て ----
+  function rand(n) { seed = (seed * 9301 + 49297) % 233280; return Math.floor((seed / 233280) * n); }
+  function pick() {
+    let pool = bank.filter((q) => (!st.grade || q.grade === st.grade) && (!st.subject || q.subject === st.subject) && unitMatch(q.unit, st.unit));
+    if (!pool.length) return [];
+    // 学校が合うものを少し優先
+    const score = (q) => (q.frequency || 1) * 10 + ((st.school && (q.schools || []).includes(st.school)) ? 15 : 0) + rand(8);
+    const want = st.mix === 'basic' ? { basic: .5, standard: .4, advanced: .1 } : st.mix === 'advanced' ? { basic: .2, standard: .4, advanced: .4 } : { basic: .3, standard: .5, advanced: .2 };
+    const byLevel = { basic: [], standard: [], advanced: [] };
+    pool.map((q) => ({ q, s: score(q) })).sort((a, b) => b.s - a.s).forEach(({ q }) => (byLevel[q.level || 'standard'] || byLevel.standard).push(q));
+    const n = Math.min(st.count, pool.length);
+    const out = []; const usedTopic = new Map();
+    const take = (lv, k) => { const list = byLevel[lv]; for (let i = 0; i < list.length && k > 0; i++) { const q = list[i]; if (out.includes(q)) continue; const t = q.topic || q.id; if ((usedTopic.get(t) || 0) >= 2 && list.length > k + i) continue; out.push(q); usedTopic.set(t, (usedTopic.get(t) || 0) + 1); k--; } };
+    ['basic', 'standard', 'advanced'].forEach((lv) => take(lv, Math.round(n * want[lv])));
+    // 足りない分はよく出る順で埋める
+    pool.slice().sort((a, b) => score(b) - score(a)).forEach((q) => { if (out.length < n && !out.includes(q)) out.push(q); });
+    // 易しい順に並べ、パターン（topic）ごとに大問にまとめる
+    const order = { basic: 0, standard: 1, advanced: 2 };
+    out.sort((a, b) => (order[a.level || 'standard'] - order[b.level || 'standard']));
+    const groups = []; out.forEach((q) => { const key = q.topic || q.qtype || '問題'; let g = groups.find((x) => x.key === key && x.items.length < 4); if (!g) { g = { key, items: [] }; groups.push(g); } g.items.push(q); });
+    return groups;
+  }
+
+  function sheetHtml(groups, answers) {
+    let n = 0;
+    const school = st.school ? `${st.school}中` : '';
+    const title = `定期テスト予想問題　${esc(st.grade)} ${esc(st.subject)}「${esc(st.unit)}」`;
+    const body = groups.map((g) => {
+      n++;
+      return `<div class="daimon"><div class="dt"><span class="no">${n}</span><span class="lead">${g.items.length > 1 ? '次の問いに答えなさい。' : ''}</span></div>
+        ${g.items.map((q, i) => `<div class="sq"><span class="k">(${i + 1})</span><div>
+          <div class="q">${answers ? esc(q.answer || '（解答なし）') : esc(q.question)}</div>
+          ${!answers && q.figure_svg ? `<div class="fig">${q.figure_svg}</div>` : ''}
+          ${!answers ? `<div class="ans-space ${/記述|証明|作図|説明/.test(q.qtype || '') ? 'tall' : ''}"></div>` : ''}
+          ${!answers && (q.frequency || 1) >= 3 ? `<span class="star noprint">★よく出る（${q.frequency}回）</span>` : ''}
+        </div></div>`).join('')}</div>`;
+    }).join('');
+    return `<div class="paper ${answers ? 'ans' : ''}">
+      <div class="head"><div class="ttl">${answers ? '【解答】' : ''}${title}</div><div class="sub">${esc(school)}　${esc(todayYmd().replace(/-/g, '/'))}</div></div>
+      ${answers ? '' : '<div class="name">　年　<span></span>組　<span></span>番　氏名 <span class="nm"></span>　　得点 <span></span>／100</div>'}
+      ${body}
+      <div class="foot"><span>エイメイ学院/明成個別</span><span>${answers ? '解答' : '問題'}</span></div>
+    </div>`;
+  }
+
+  function render() {
+    const units = {};
+    bank.filter((q) => (!st.grade || q.grade === st.grade) && (!st.subject || q.subject === st.subject)).forEach((q) => { units[q.unit] = (units[q.unit] || 0) + 1; });
+    const unitList = Object.entries(units).sort((a, b) => b[1] - a[1]);
+    app.innerHTML = `
+      <div class="topbar noprint"><div><h1>📝 定期テスト予想問題</h1><div class="sub">過去の定期テストで「よく出る形」から作った問題で、A4 のテストを組み立てます</div></div>
+        <a class="btn ghost sm" href="teacher.html${qs.get('embed') ? '?embed=1' : ''}">← 講師画面</a></div>
+      <div class="card ctl noprint">
+        <div class="row">
+          <select id="sGrade"><option value="">学年</option>${C.GRADES.map((g) => `<option ${st.grade === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select>
+          <select id="sSubject"><option value="">教科</option>${C.SUBJECTS.filter((x) => x !== 'その他').map((x) => `<option ${st.subject === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+          <select id="sSchool"><option value="">全学校</option>${C.SCHOOLS.map((x) => `<option ${st.school === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+        </div>
+        <label class="lbl">単元</label>
+        <input class="input" id="sUnit" placeholder="例: 一次関数" value="${esc(st.unit)}">
+        <div class="unit-chips">${unitList.length ? unitList.map(([u, c]) => `<button class="chip ${unitMatch(u, st.unit) && st.unit ? 'selected' : ''}" data-u="${esc(u)}">${esc(u)}<span class="n">${c}問</span></button>`).join('') : `<span class="note">${st.grade && st.subject ? 'この学年・教科のストックはまだありません。' : '学年と教科を選ぶと、作れる単元が出ます。'}</span>`}</div>
+        <div class="row mt">
+          <select id="sCount">${[6, 8, 10, 12, 15].map((n) => `<option value="${n}" ${st.count === n ? 'selected' : ''}>${n}問</option>`).join('')}</select>
+          <select id="sMix"><option value="auto" ${st.mix === 'auto' ? 'selected' : ''}>難易度：ふつう</option><option value="basic" ${st.mix === 'basic' ? 'selected' : ''}>基礎多め</option><option value="advanced" ${st.mix === 'advanced' ? 'selected' : ''}>応用多め</option></select>
+          <label class="small" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="sAns" ${st.withAnswers ? 'checked' : ''}> 解答も印刷</label>
+        </div>
+        <div class="row mt"><button class="btn" id="bMake">作成</button><button class="btn ghost" id="bRemake">🔀 作り直す</button><button class="btn ghost" id="bPrint">🖨 印刷</button></div>
+        <div class="note mt">★は過去問で3回以上出た形です（印刷には出ません）。ストックに無い単元は、Claude に「○年○○の△△の予想問題を追加して」と頼んでください。</div>
+      </div>
+      <div class="paper-wrap" id="out"></div>`;
+    $('#sGrade').onchange = (e) => { st.grade = e.target.value; render(); };
+    $('#sSubject').onchange = (e) => { st.subject = e.target.value; render(); };
+    $('#sSchool').onchange = (e) => { st.school = e.target.value; };
+    $('#sUnit').addEventListener('change', (e) => { st.unit = e.target.value.trim(); });
+    $$('[data-u]').forEach((b) => b.onclick = () => { st.unit = b.dataset.u; render(); make(); });
+    $('#sCount').onchange = (e) => { st.count = Number(e.target.value); };
+    $('#sMix').onchange = (e) => { st.mix = e.target.value; };
+    $('#sAns').onchange = (e) => { st.withAnswers = e.target.checked; document.body.classList.toggle('with-answers', st.withAnswers); };
+    document.body.classList.toggle('with-answers', st.withAnswers);
+    $('#bMake').onclick = () => { st.unit = $('#sUnit').value.trim(); make(); };
+    $('#bRemake').onclick = () => { seed = (seed * 7 + 13) % 233280 || 1; st.unit = $('#sUnit').value.trim(); make(); };
+    $('#bPrint').onclick = () => window.print();
+    if (st.unit && st.grade && st.subject) make();
+  }
+
+  function make() {
+    const out = $('#out');
+    if (!st.grade || !st.subject || !st.unit) { out.innerHTML = '<div class="card note">学年・教科・単元を選んでください。</div>'; return; }
+    const groups = pick();
+    if (!groups.length) { out.innerHTML = `<div class="card">「${esc(st.unit)}」の予想問題はまだストックにありません。<div class="note mt">Claude に「${esc(st.grade)}${esc(st.subject)}の${esc(st.unit)}の予想問題を追加して」と頼むと追加できます。</div></div>`; return; }
+    const total = groups.reduce((a, g) => a + g.items.length, 0);
+    const srcs = [...new Set(groups.flatMap((g) => g.items.map((q) => q.source_label)).filter(Boolean))];
+    out.innerHTML = sheetHtml(groups, false) + sheetHtml(groups, true)
+      + `<div class="src noprint teacher-only">${total}問　元にした過去問：${srcs.length ? srcs.map(esc).join('／') : '—'}</div>`;
+  }
+
+  if (pass) api.teacherLogin(pass).then(start).catch(() => renderLogin());
+  else renderLogin();
+})();
+</script>
+</body>
+</html>

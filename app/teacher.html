@@ -216,7 +216,7 @@
     if (tab === 'done') return renderDone(body);
     const active = [filterRoom, filterKind === 'print' ? 'プリント' : filterKind === 'question' ? '質問' : '', filterGrade, filterSchool, filterSubject, sortMode === 'group' ? '学年→教科→単元' : ''].filter(Boolean);
     const open = filtersOpen || active.length > 0;
-    body.innerHTML = `<div class="filterbar"><button class="btn xs ${active.length ? 'soft' : 'ghost'}" id="fToggle">🔍 絞り込み${active.length ? '：' + active.map(esc).join('・') : ''} ${open ? '▲' : '▼'}</button>${active.length ? '<button class="btn xs ghost" id="fClear">解除</button>' : ''}<span class="spacer"></span>${materialsAll.length ? '<button class="btn xs ghost" id="bMat">📂 教材</button>' : ''}<button class="btn xs ${selecting ? 'soft' : 'ghost'}" id="bSelect">☑ ${selecting ? '選ぶのをやめる' : 'まとめて選ぶ'}</button></div>
+    body.innerHTML = `<div class="filterbar"><button class="btn xs ${active.length ? 'soft' : 'ghost'}" id="fToggle">🔍 絞り込み${active.length ? '：' + active.map(esc).join('・') : ''} ${open ? '▲' : '▼'}</button>${active.length ? '<button class="btn xs ghost" id="fClear">解除</button>' : ''}<span class="spacer"></span><button class="btn xs ghost" id="bYosou">📝 予想問題</button>${materialsAll.length ? '<button class="btn xs ghost" id="bMat">📂 教材</button>' : ''}<button class="btn xs ${selecting ? 'soft' : 'ghost'}" id="bSelect">☑ ${selecting ? '選ぶのをやめる' : 'まとめて選ぶ'}</button></div>
       <div class="filters ${open ? '' : 'hidden'}">
         <select id="fRoom"><option value="">全教室</option>${C.CLASSROOMS.map((c) => `<option ${filterRoom === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
         <select id="fKind"><option value="">種類：全部</option><option value="question" ${filterKind === 'question' ? 'selected' : ''}>質問</option><option value="print" ${filterKind === 'print' ? 'selected' : ''}>プリント</option></select>
@@ -232,6 +232,7 @@
     $('#fToggle').onclick = () => { filtersOpen = !open; renderBody(); };
     $('#bSelect').onclick = () => { selecting = !selecting; picked.clear(); renderBody(); };
     if ($('#bMat')) $('#bMat').onclick = () => openMaterialSearch(null);
+    $('#bYosou').onclick = () => openYosou(null);
     if ($('#fClear')) $('#fClear').onclick = () => { filterRoom = filterKind = filterGrade = filterSchool = filterSubject = ''; sortMode = 'time'; filterUrgent = false; filtersOpen = false; renderBody(); renderSummary(); };
     $('#fRoom').onchange = (e) => { filterRoom = e.target.value; renderList(); };
     $('#fKind').onchange = (e) => { filterKind = e.target.value; renderList(); };
@@ -422,6 +423,13 @@
   const matLink = (m) => `<a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(shortTitle(m.title))}</a>`;
   function materialList(items) {
     return `<ul class="mats">${items.map(({ m }) => `<li>${matLink(m)} ${m.note === '解答' ? '<span class="cat">解答</span>' : ''}${catChips(m)}${m.grades && m.grades.length ? `<span class="sub"> ${esc(m.grades.join('・'))}</span>` : ''}${m.path ? `<div class="sub">${esc(m.path)}</div>` : ''}</li>`).join('')}</ul>`;
+  }
+  // 定期テスト予想問題のページへ（同じ画面のまま移動。埋め込み中もログインが引き継がれる）
+  function openYosou(r) {
+    const p = new URLSearchParams();
+    if (r) { p.set('grade', r.grade || ''); p.set('subject', r.subject || ''); p.set('unit', r.unit_name || ''); const sc = schoolOf(r); if (sc && C.SCHOOLS.includes(sc)) p.set('school', sc); }
+    if (EMBED) p.set('embed', '1');
+    location.href = 'yosou.html' + (p.toString() ? '?' + p.toString() : '');
   }
   // 教材さがし（自動の候補に無いとき）
   function openMaterialSearch(r) {
@@ -639,6 +647,7 @@
     if (act === 'slip') return openSlipModal(r);
     if (act === 'targets') return openTargetsModal(r);
     if (act === 'msearch') return openMaterialSearch(r);
+    if (act === 'yosou') return openYosou(r);
     if (act === 'group') { filterKind = 'print'; filterGrade = r.grade; filterSubject = r.subject; const sc = schoolOf(r); filterSchool = !sc ? '' : (C.SCHOOLS.includes(sc) ? sc : C.SCHOOL_OTHER); sortMode = 'group'; return renderBody(); }
     if (act === 'start') return doUpdate(id, 'start', tname, null, null);
     if (act === 'reopen') return doUpdate(id, 'reopen', null, null, null);
@@ -814,7 +823,7 @@
     if (materialsAll.length) {
       const sg = suggestMaterials(r, 8);
       const hits = sg.filter((x) => x.unitHit), others = sg.filter((x) => !x.unitHit).slice(0, 3);
-      parts.push(`<div class="assist-row print-sg">🖨 <b>印刷候補</b>（${esc(CAT_JA[PURPOSE_CAT[r.purpose]] || '')}${r.difficulty === 'advanced' || li.rec === 'advanced' ? '・難問も' : ''}）<button class="btn xs ghost" data-act="msearch" data-id="${r.id}">📂 ほかをさがす</button>
+      parts.push(`<div class="assist-row print-sg">🖨 <b>印刷候補</b>（${esc(CAT_JA[PURPOSE_CAT[r.purpose]] || '')}${r.difficulty === 'advanced' || li.rec === 'advanced' ? '・難問も' : ''}）<button class="btn xs ghost" data-act="msearch" data-id="${r.id}">📂 ほかをさがす</button>${r.purpose === 'test' ? `<button class="btn xs ghost" data-act="yosou" data-id="${r.id}">📝 予想問題</button>` : ''}
         ${hits.length ? materialList(hits) : '<div class="sub">単元に合う教材が見つかりません</div>'}
         ${!hits.length && others.length ? `<div class="sub" style="margin-top:4px">同じ教科・学年の教材：</div>${materialList(others)}` : ''}</div>`);
     }

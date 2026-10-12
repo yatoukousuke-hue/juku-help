@@ -12,3 +12,6 @@ dev/preview/
 dev/shots/
 dev/drive_materials.json
 dev/drive_materials_*.json
+dev/past_exams_*.json
+dev/past_exams/
+dev/exam_bank/

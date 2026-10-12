@@ -107,6 +107,32 @@ create table if not exists public.print_materials (
 alter table public.print_materials enable row level security;
 revoke all on public.print_materials from anon, authenticated;
 
+-- 定期テストの予想問題のストック（講師だけ）。過去問から「よく出る形」を取り出し、それを元に作った問題
+-- kind: predicted=予想問題（印刷に使う） / pattern=過去問の出題パターンのメモ（印刷しない）
+create table if not exists public.exam_questions (
+  id           bigserial primary key,
+  kind         text not null default 'predicted' check (kind in ('predicted','pattern')),
+  subject      text not null,
+  grade        text not null,
+  schools      text[] not null default '{}',     -- 出題が多い学校（空なら共通）
+  unit         text not null,                    -- 単元（例: 一次関数）
+  topic        text not null default '',         -- 出題パターン（例: 2点を通る直線の式）
+  frequency    int  not null default 1,          -- 過去問で出た回数
+  level        text check (level in ('basic','standard','advanced')),
+  qtype        text not null default '',         -- 計算/選択/記述/穴埋め/作図/並べ替え など
+  question     text not null,
+  answer       text not null default '',
+  points       int,
+  figure_svg   text not null default '',         -- 図（SVG）。図が要る問題は図を付ける
+  source_label text not null default '',         -- 元にした過去問（例: 2023 2学期中間 水谷 中2）
+  batch        text not null default '',         -- 取り込みのまとまり（作り直しで差し替える単位）
+  hidden       boolean not null default false,
+  created_at   timestamptz not null default now()
+);
+create index if not exists exam_questions_unit_idx on public.exam_questions (subject, grade, unit);
+alter table public.exam_questions enable row level security;
+revoke all on public.exam_questions from anon, authenticated;
+
 -- ---------- 2. 直接アクセス禁止（すべて下の関数経由にする） ----------
 
 alter table public.app_settings enable row level security;
@@ -592,6 +618,56 @@ begin
   return v_m;
 end $$;
 
+-- 予想問題のストック一覧（講師だけ。1つの JSON で返す）
+create or replace function public.teacher_exam_questions(p_pass text)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform check_pass(p_pass);
+  return coalesce((select jsonb_agg(to_jsonb(q) - 'created_at' order by q.subject, q.grade, q.unit, q.frequency desc, q.id) from exam_questions q), '[]'::jsonb);
+end $$;
+
+-- 取り込み: 同じ batch の行をいったん消して入れ直す（作り直しに対応）。hidden は引き継がない
+create or replace function public.teacher_import_exam_questions(p_pass text, p_batch text, p_rows jsonb)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare v_n int := 0; v_r jsonb;
+begin
+  perform check_pass(p_pass);
+  if coalesce(p_batch,'') = '' then raise exception 'BAD_BATCH'; end if;
+  if jsonb_typeof(p_rows) <> 'array' then raise exception 'BAD_ROWS'; end if;
+  delete from exam_questions where batch = p_batch;
+  for v_r in select * from jsonb_array_elements(p_rows) loop
+    if coalesce(v_r->>'subject','') = '' or coalesce(v_r->>'grade','') = '' or coalesce(v_r->>'unit','') = '' or coalesce(v_r->>'question','') = '' then continue; end if;
+    insert into exam_questions (kind, subject, grade, schools, unit, topic, frequency, level, qtype, question, answer, points, figure_svg, source_label, batch)
+    values (coalesce(nullif(v_r->>'kind',''),'predicted'), v_r->>'subject', v_r->>'grade',
+            coalesce(array(select jsonb_array_elements_text(v_r->'schools')), '{}'), v_r->>'unit', coalesce(v_r->>'topic',''),
+            coalesce((v_r->>'frequency')::int, 1), nullif(v_r->>'level',''), coalesce(v_r->>'qtype',''), v_r->>'question',
+            coalesce(v_r->>'answer',''), (v_r->>'points')::int, coalesce(v_r->>'figure_svg',''), coalesce(v_r->>'source_label',''), p_batch);
+    v_n := v_n + 1;
+  end loop;
+  return jsonb_build_object('imported', v_n);
+end $$;
+
+-- 1問を直す・隠す
+create or replace function public.teacher_save_exam_question(p_pass text, p_id bigint, p_fields jsonb)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare v_q exam_questions%rowtype;
+begin
+  perform check_pass(p_pass);
+  if p_fields is null or jsonb_typeof(p_fields) <> 'object' then raise exception 'BAD_FIELDS'; end if;
+  update exam_questions set
+    question = coalesce(p_fields->>'question', question),
+    answer   = coalesce(p_fields->>'answer', answer),
+    unit     = coalesce(p_fields->>'unit', unit),
+    level    = case when p_fields ? 'level' then nullif(p_fields->>'level','') else level end,
+    hidden   = coalesce((p_fields->>'hidden')::boolean, hidden)
+  where id = p_id returning * into v_q;
+  if not found then raise exception 'NOT_FOUND'; end if;
+  return to_jsonb(v_q) - 'created_at';
+end $$;
+
 -- 合言葉の変更
 create or replace function public.teacher_set_pass(p_pass text, p_new text) returns boolean
 language plpgsql security definer set search_path = public as $$
@@ -617,6 +693,7 @@ grant execute on function
   public.teacher_set_targets(text,bigint,jsonb), public.teacher_recent_prints(text,int),
   public.teacher_set_student_active(text,bigint,boolean),
   public.teacher_materials(text), public.teacher_import_materials(text,jsonb), public.teacher_save_material(text,bigint,jsonb),
+  public.teacher_exam_questions(text), public.teacher_import_exam_questions(text,text,jsonb), public.teacher_save_exam_question(text,bigint,jsonb),
   public.teacher_set_pass(text,text)
 to anon, authenticated;
 

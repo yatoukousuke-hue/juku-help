@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 // 1回目と2回目（あれば）の一覧を合わせる（同じファイルは1つに）
 const src = [];
 const seen = new Set();
-for (const f of ['dev/drive_materials.json', 'dev/drive_materials_pass2.json', 'dev/drive_materials_pass3.json']) {
+for (const f of ['dev/drive_materials.json', 'dev/drive_materials_pass2.json', 'dev/drive_materials_pass3.json', 'dev/drive_materials_pass4.json', 'dev/drive_materials_pass5.json']) {
   if (!existsSync(f)) continue;
   for (const x of JSON.parse(readFileSync(f, 'utf8'))) { if (!x.id || seen.has(x.id)) continue; seen.add(x.id); src.push(x); }
 }

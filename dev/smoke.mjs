@@ -352,6 +352,32 @@ ok('生徒側の名簿から消える', !(await t.w.JH.api.listStudents()).some(
 t.click('戻す', arai); await sleep(500);
 ok('戻すと有効', (await t.w.JH.api.listStudents()).some((x) => x.name === '新井 太郎'));
 
+console.log('--- 予想問題');
+{
+  storage.setItem('jh_tpass', JSON.stringify('sensei'));
+  const tt = load('teacher.html'); await sleep(500);
+  const imp = await tt.w.JH.api.teacherImportExamQuestions('sensei', 'test-math2', [
+    { subject: '数学', grade: '中2', schools: ['水谷'], unit: '一次関数', topic: '直線の式', frequency: 6, level: 'standard', qtype: '計算', question: '2点(1, 3), (3, 7)を通る直線の式を求めなさい。', answer: 'y = 2x + 1', source_label: '2023 2学期中間' },
+    { subject: '数学', grade: '中2', unit: '一次関数', topic: '変化の割合', frequency: 4, level: 'basic', qtype: '計算', question: 'y = 3x - 2 の変化の割合を答えなさい。', answer: '3' },
+    { subject: '数学', grade: '中2', unit: '一次関数', topic: '2直線の交点', frequency: 2, level: 'advanced', qtype: '記述', question: '2直線 y = x + 1, y = -x + 5 の交点の座標を求めなさい。', answer: '(2, 3)', figure_svg: '<svg viewBox="0 0 10 10"><line x1="0" y1="10" x2="10" y2="0" stroke="black"/></svg>' },
+    { subject: '数学', grade: '中1', unit: '比例', question: 'y は x に比例し…', answer: 'y = 2x' },
+  ]);
+  ok('予想問題ストックの取り込み（お試し）', imp.imported === 4);
+  const y = load('yosou.html?grade=中2&subject=数学&unit=1次関数'); await sleep(600);
+  const papers = y.w.document.querySelectorAll('.paper');
+  ok('問題と解答の2枚', papers.length === 2, y.text().slice(0, 200));
+  ok('「1次関数」でも一次関数の問題（3問）', papers[0].querySelectorAll('.sq').length === 3 && papers[0].textContent.includes('通る直線の式'));
+  ok('中1の問題は入らない', !papers[0].textContent.includes('比例し'));
+  ok('解答ページ', papers[1].textContent.includes('y = 2x + 1') && papers[1].textContent.includes('【解答】'));
+  ok('図つきの問題には図', !!papers[0].querySelector('.fig svg'));
+  ok('よく出る印（画面だけ）', [...papers[0].querySelectorAll('.star')].some((x) => x.textContent.includes('6回')) && papers[0].querySelector('.star').classList.contains('noprint'));
+  ok('作れる単元のボタン', y.$('.unit-chips').textContent.includes('一次関数') && y.$('.unit-chips').textContent.includes('3問'));
+  y.setVal('#sUnit', '確率'); y.$('#sUnit').dispatchEvent(new y.w.Event('change')); y.click('作成'); await sleep(100);
+  ok('ストックに無い単元は案内', y.$('#out').textContent.includes('まだストックにありません'));
+  const t2 = load('teacher.html'); await sleep(600);
+  ok('講師画面に「📝 予想問題」', !!t2.$('#bYosou'));
+}
+
 console.log('--- 埋め込みモード');
 storage.removeItem('jh_tpass');
 {

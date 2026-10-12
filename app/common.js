@@ -124,6 +124,9 @@
       teacherRecentPrints: (pass, days) => call('teacher_recent_prints', { p_pass: pass, p_days: days }),
       teacherSetStudentActive: (pass, sid, active) => call('teacher_set_student_active', { p_pass: pass, p_student_id: sid, p_active: !!active }),
       teacherMaterials: (pass) => call('teacher_materials', { p_pass: pass }),
+      teacherExamQuestions: (pass) => call('teacher_exam_questions', { p_pass: pass }),
+      teacherImportExamQuestions: (pass, batch, rows) => call('teacher_import_exam_questions', { p_pass: pass, p_batch: batch, p_rows: rows }),
+      teacherSaveExamQuestion: (pass, id, fields) => call('teacher_save_exam_question', { p_pass: pass, p_id: id, p_fields: fields }),
       teacherImportMaterials: (pass, rows) => call('teacher_import_materials', { p_pass: pass, p_rows: rows }),
       teacherSaveMaterial: (pass, id, fields) => call('teacher_save_material', { p_pass: pass, p_id: id ?? null, p_fields: fields }),
     };
@@ -226,6 +229,14 @@
       },
       teacherScoresAll: async (pass) => { const db = load(); checkPass(db, pass); return delay((db.scores || []).filter((x) => (db.students.find((s) => s.id === x.student_id) || {}).active).map((x) => ({ ...x }))); },
       teacherSetTargets: async (pass, sid, targets) => { const db = load(); checkPass(db, pass); const s = db.students.find((x) => x.id === sid); if (!s) throw new Error('NO_STUDENT'); s.targets = targets || {}; save(db); return delay({ ...s }); },
+      teacherExamQuestions: async (pass) => { const db = load(); checkPass(db, pass); return delay((db.exam || []).slice().sort((a, b) => (b.frequency || 1) - (a.frequency || 1)).map((q) => ({ ...q }))); },
+      teacherImportExamQuestions: async (pass, batch, rows) => {
+        const db = load(); checkPass(db, pass); if (!batch) throw new Error('BAD_BATCH');
+        db.exam = (db.exam || []).filter((q) => q.batch !== batch); let n = 0;
+        for (const r of rows) { if (!r.subject || !r.grade || !r.unit || !r.question) continue; db.exam.push({ id: (db.examSeq = (db.examSeq || 0) + 1), kind: 'predicted', schools: [], topic: '', frequency: 1, level: null, qtype: '', answer: '', points: null, figure_svg: '', source_label: '', hidden: false, ...r, batch }); n++; }
+        save(db); return delay({ imported: n });
+      },
+      teacherSaveExamQuestion: async (pass, id, f) => { const db = load(); checkPass(db, pass); const q = (db.exam || []).find((x) => x.id === id); if (!q) throw new Error('NOT_FOUND'); Object.assign(q, f); save(db); return delay({ ...q }); },
       teacherMaterials: async (pass) => { const db = load(); checkPass(db, pass); return delay((db.materials || []).map((m) => ({ ...m }))); },
       teacherImportMaterials: async (pass, rows) => {
         const db = load(); checkPass(db, pass); db.materials = db.materials || []; let n = 0;

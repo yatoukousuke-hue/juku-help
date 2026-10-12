@@ -2,9 +2,15 @@
 // 教科・学年・単元・用途（導入/弱点補強/類題演習/テスト形式/難問）に分類して dev/drive_materials_rows.json に書く。
 // 中身は読まない。個人情報らしいものはここでも念のため除外する。
 // 実行: node dev/classify_materials.mjs [--upload]   （--upload で本番 DB に取り込む）
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 
-const src = JSON.parse(readFileSync('dev/drive_materials.json', 'utf8'));
+// 1回目と2回目（あれば）の一覧を合わせる（同じファイルは1つに）
+const src = [];
+const seen = new Set();
+for (const f of ['dev/drive_materials.json', 'dev/drive_materials_pass2.json']) {
+  if (!existsSync(f)) continue;
+  for (const x of JSON.parse(readFileSync(f, 'utf8'))) { if (!x.id || seen.has(x.id)) continue; seen.add(x.id); src.push(x); }
+}
 const z2h = (s) => String(s || '').replace(/[０-９Ａ-Ｚａ-ｚ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/　/g, ' ');
 
 // 念のための個人情報フィルタ（サブエージェントで除外済みだが二重に）
@@ -32,12 +38,27 @@ function detectGrades(text) {
   if (/中3|中学3|3年|中三|受験|入試|北辰/.test(t)) g.add('中3');
   return [...g];
 }
+const UNIT_GRADE = {
+  数学: [['中3', /2次方程式|二次方程式|平方根|因数分解|展開|相似|円周角|三平方|標本|2乗に比例|二乗に比例|y=ax/], ['中2', /連立|1次関数|一次関数|合同|証明|確率|箱ひげ|三角形|四角形|平行線/], ['中1', /正負|正の数|負の数|文字式|1次方程式|一次方程式|比例|反比例|平面図形|空間図形|作図|おうぎ形|投影図|資料の活用|度数/]],
+  理科: [['中3', /イオン|電池|酸|アルカリ|中和|細胞分裂|生殖|遺伝|進化|天体|月|金星|運動|仕事|エネルギー|力の合成|浮力/], ['中2', /化学変化|酸化|還元|原子|分子|化学反応式|電流|電圧|磁界|電磁誘導|静電気|天気|気象|前線|湿度|動物のからだ|消化|呼吸|血液|細胞|光合成|植物のからだ/], ['中1', /物質|気体|水溶液|状態変化|密度|光|音|力|ばね|圧力|火山|地震|地層|植物の分類|動物の分類|脊椎/]],
+  社会: [['中3', /公民|憲法|人権|選挙|国会|内閣|裁判|経済|財政|国際/]],
+};
+function guessGradeByUnit(subject, text) {
+  for (const [g, re] of (UNIT_GRADE[subject] || [])) if (re.test(text)) return [g];
+  return [];
+}
 // 用途の判定（フォルダの性格 → ファイル名の順に見る）
 // intro=苦手な子の導入 / weak=弱点補強 / practice=類題演習 / test=テスト形式 / hard=難しい問題
 function detectCategories(path, title) {
   const t = path + ' ' + title;
   const c = new Set();
   if (/北辰/.test(t)) c.add('test');
+  if (/講習|合宿|講義|板書|QRノート|授業プリント|通常授業/.test(t)) { c.add('intro'); c.add('practice'); }
+  if (/ベーシック|基礎編|準備講座|はじめて/.test(t)) c.add('intro');
+  if (/補強プリント|弱点補強|補強テキスト|大問一|計算の達人/.test(t)) c.add('weak');
+  if (/検定テスト|学年末検定|メモリーツリー/.test(t)) c.add('test');
+  if (/上位への|上位層|アルティメット|ハイ数学|ハイ英語|ハイ|難関|応用編/.test(t)) c.add('hard');
+  if (/学校のワーク|指導要領ワーク|フォレスタ/.test(t)) c.add('practice');
   if (/過去問|入試問題|県立入試|公立入試|入試リハ|予想問題|追検査|受験問題/.test(t)) { c.add('test'); if (/学校選択|（選択）|\(選択\)|選択問題/.test(title)) c.add('hard'); }
   if (/Eテスト|確認テスト|単元テスト|単元確認|小テスト|チェックテスト|単語テスト|熟語テスト|プレ中間|プレ期末|はじめての定期テスト|テスト$|テスト\./.test(t)) c.add('test');
   if (/Eテスト|確認テスト|単元確認|単元テスト/.test(t)) c.add('weak');
@@ -61,6 +82,7 @@ try { rosterNames = JSON.parse(readFileSync('dev/roster_import.json', 'utf8')).m
 const hasStudentName = (t) => { const n = t.replace(/[\s　]/g, ''); return rosterNames.some((x) => n.includes(x)); };
 // 生徒に配るものではない資料（正答率表・偏差値表・手引き・答案用紙など）は候補に出さない
 const NOT_PRINT = /正答率|偏差値|度数分布|成績表|手引|分析|講評|集計|平均点|得点分布/;
+const UNUSED = /使わない|使用しない|旧版|古い版|ボツ/;
 
 const rows = [];
 let skipped = 0, nameSkipped = 0;
@@ -70,12 +92,14 @@ for (const f of src) {
   if (PRIVATE.test(all)) { skipped++; continue; }
   if (hasStudentName(path + f.title)) { nameSkipped++; continue; }
   const subject = detectSubject(z2h(path), z2h(f.title));
-  const grades = detectGrades(all);
+  let grades = detectGrades(all);
+  if (!grades.length) grades = guessGradeByUnit(subject, z2h(f.title + ' ' + path));
   const categories = detectCategories(z2h(path), z2h(f.title));
-  const answer = /解答|答え|解説|answer|マークシート/i.test(f.title);
+  const answer = /解答|答え|こたえ|answer|マークシート/i.test(f.title);
+  const editable = /編集用|編集可能|原本/.test(f.title);
   const level = categories.includes('hard') ? 'advanced' : (categories.includes('intro') && !categories.includes('test')) ? 'basic' : 'standard';
-  const notPrint = NOT_PRINT.test(f.title);
-  rows.push({ drive_id: f.id, title: f.title, url: f.url, subject, grades, unit: detectUnit(f.title), categories, level, path, note: notPrint ? '資料' : answer ? '解答' : '', hidden: notPrint });
+  const notPrint = NOT_PRINT.test(f.title) || UNUSED.test(path + ' ' + f.title);
+  rows.push({ drive_id: f.id, title: f.title, url: f.url, subject, grades, unit: detectUnit(f.title), categories, level, path, note: notPrint ? '資料' : answer ? '解答' : editable ? '編集用' : '', hidden: notPrint });
 }
 writeFileSync('dev/drive_materials_rows.json', JSON.stringify(rows, null, 1));
 const count = (k) => { const m = {}; rows.forEach((r) => { const v = typeof k === 'function' ? k(r) : r[k]; (Array.isArray(v) ? (v.length ? v : ['(なし)']) : [v || '(なし)']).forEach((x) => { m[x] = (m[x] || 0) + 1; }); }); return Object.entries(m).sort((a, b) => b[1] - a[1]).map(([a, b]) => `${a}:${b}`).join('  '); };

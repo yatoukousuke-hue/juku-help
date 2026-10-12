@@ -20,7 +20,7 @@ const storage = {
 };
 
 function load(file) {
-  let html = read(file);
+  let html = read(file.split('?')[0]);
   // 外部スクリプトをインライン化。config は Supabase 未設定（お試しモード）に差し替える
   html = html.replace(/<script src="config.js"><\/script>/, () => `<script>${read('config.js').replace(/SUPABASE_URL: "[^"]*"/, 'SUPABASE_URL: ""')}</script>`)
              .replace(/<script src="materials.js"><\/script>/, () => `<script>${read('materials.js')}</script>`)
@@ -316,6 +316,21 @@ ok('無効になった', arai && arai.classList.contains('inactive') && arai.tex
 ok('生徒側の名簿から消える', !(await t.w.JH.api.listStudents()).some((x) => x.name === '新井 太郎'));
 t.click('戻す', arai); await sleep(500);
 ok('戻すと有効', (await t.w.JH.api.listStudents()).some((x) => x.name === '新井 太郎'));
+
+console.log('--- 埋め込みモード');
+storage.removeItem('jh_tpass');
+{
+  const e = load('teacher.html?embed=1'); await sleep(400);
+  ok('埋め込み時はログイン画面に待機の案内', e.text().includes('運営アプリから合言葉を受け取っています'));
+  ok('embed クラスが付く', e.w.document.documentElement.classList.contains('embed'));
+  // 許可していないサイトからの合図は無視
+  e.w.dispatchEvent(new e.w.MessageEvent('message', { data: { type: 'jh-login', pass: 'sensei', name: '偽' }, origin: 'https://evil.example' })); await sleep(300);
+  ok('許可外サイトからの合言葉は無視', e.text().includes('合言葉'));
+  e.w.dispatchEvent(new e.w.MessageEvent('message', { data: { type: 'jh-login', pass: 'sensei', name: '菅原' }, origin: 'https://manabi-operations.vercel.app' })); await sleep(600);
+  ok('運営アプリからの合図で入る（講師名も反映）', e.text().includes('待ち') && e.text().includes('菅原'), e.text().slice(0, 200));
+  e.w.dispatchEvent(new e.w.MessageEvent('message', { data: { type: 'jh-login', pass: 'wrong', name: '菅原' }, origin: 'https://manabi-operations.vercel.app' })); await sleep(600);
+  ok('間違った合言葉なら案内つきのログイン画面', e.text().includes('受け取った合言葉で入れませんでした'));
+}
 
 console.log('--- QR ページ');
 const q = load('qr.html'); await sleep(200);

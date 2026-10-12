@@ -66,7 +66,7 @@
     app.innerHTML = `<div class="login-wrap">
       <div class="card">
         <h2>講師画面</h2>
-        ${EMBED ? '<div class="small muted">運営アプリから自動で入ります。入らないときは合言葉と名前を入れてください。</div>' : ''}
+        ${EMBED ? '<div class="small muted" id="embedWait">運営アプリから合言葉を受け取っています…（数秒たっても入れないときは、下に合言葉と名前を入れてください）</div>' : ''}
         ${msg ? `<div class="small" style="color:var(--danger)">${esc(msg)}</div>` : ''}
         <label class="lbl">合言葉</label>
         <input class="input" id="pass" type="password" autocomplete="current-password" value="${esc(pass)}">
@@ -906,18 +906,26 @@
   }
 
   // 埋め込み時: 親アプリから {type:'jh-login', pass, name} を受け取ったらその場で入る（許可した親だけ）
+  let embedLoggedIn = false;
   window.addEventListener('message', async (ev) => {
     if (!EMBED || !EMBED_PARENTS.includes(ev.origin)) return;
     const d = ev.data || {};
     if (d.type !== 'jh-login' || !d.pass) return;
     const newName = String(d.name || '').trim() || tname || '先生';
-    if (pass === d.pass && tname === newName && rows.length) return;   // すでに同じ内容で入っている
+    if (embedLoggedIn && pass === d.pass && tname === newName) return;   // すでに同じ内容で入っている
     try {
       await api.teacherLogin(d.pass);
       pass = d.pass; tname = newName; store.set('jh_tpass', pass); store.set('jh_tname', tname);
+      embedLoggedIn = true;
       renderMain();
-    } catch (e) { renderLogin(errorText(e)); }
+    } catch (e) { renderLogin('運営アプリから受け取った合言葉で入れませんでした（' + errorText(e) + '）。合言葉が変わっていたら、運営アプリ側の設定も合わせてください。'); }
   });
+  // 埋め込み時: 親アプリに「準備できた」と知らせ続ける（親はこれを受けて合言葉を送る）。入れたら止める
+  if (EMBED && window.parent && window.parent !== window) {
+    const ping = () => { if (embedLoggedIn) return; try { window.parent.postMessage({ type: 'jh-ready' }, '*'); } catch (_) {} };
+    ping();
+    const t = setInterval(() => { if (embedLoggedIn) clearInterval(t); else ping(); }, 1500);
+  }
 
   // ---------- 開始 ----------
   if (pass) { api.teacherLogin(pass).then(renderMain).catch((e) => renderLogin(errorText(e))); }

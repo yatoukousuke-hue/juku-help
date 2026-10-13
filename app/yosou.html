@@ -244,7 +244,7 @@
         <summary>${esc(u.unit)}<span class="n">${u.n}問・${u.subs.size}項目</span>${onN ? `<span class="on">${allOn ? '全部' : onN + '個'}選択中</span>` : ''}</summary>
         <div class="unit-chips">
           ${u.subs.size > 1 && unitHit ? `<button class="chip all ${allOn ? 'selected' : ''}" data-all="${esc(u.unit)}">この単元を全部<span class="n">${u.n}問</span></button>` : ''}
-          ${subs.map(([s, c]) => `<button class="chip ${st.sel.has(u.unit + SEP + s) ? 'selected' : ''}" data-k="${esc(u.unit + SEP + s)}">${esc(s)}<span class="n">${c}問</span></button>`).join('')}
+          ${subs.map(([s, c]) => `<button class="chip ${st.sel.has(u.unit + SEP + s) ? 'selected' : ''}" data-k="${esc(u.unit + SEP + s)}">${esc(s === OTHER && u.subs.size === 1 ? '単元まるごと' : s)}<span class="n">${c}問</span></button>`).join('')}
         </div></details>`;
     }).join('');
     if (blocks.trim()) return `<div class="ublocks">${blocks}</div>`;

@@ -174,7 +174,9 @@
     spread(pool.slice().sort((a, b) => score(b) - score(a))).forEach((q) => { if (out.length < n && !out.includes(q)) out.push(q); });
     const order = { basic: 0, standard: 1, advanced: 2 };
     const byLv = (a, b) => (order[a.level || 'standard'] - order[b.level || 'standard']) || String(a.topic).localeCompare(String(b.topic), 'ja');
-    const subs = [...new Set(out.map(keyOf))];
+    // 小単元の並びは一覧（教科書の順）に合わせる
+    const pos = new Map(); tree().forEach((u) => u.subs.forEach((n, sname) => pos.set(u.unit + SEP + sname, pos.size)));
+    const subs = [...new Set(out.map(keyOf))].sort((a, b) => (pos.get(a) ?? 999) - (pos.get(b) ?? 999));
     const groups = [];
     if (subs.length >= 2 && subs.length <= 5) {
       // 小単元（作品）ごとに大問を分ける：大問1 枕草子、大問2 平家物語 …

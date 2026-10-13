@@ -83,8 +83,10 @@ s.setVal('#reasonInput', '明日テスト');
 s.click('送信する'); await sleep(500);
 ok('受付番号が出る', s.text().includes('受け付けました') && s.text().includes('受付番号'), s.text().slice(0, 200));
 ok('受付画面に単元・難易度', s.text().includes('一次関数') && s.text().includes('標準・ふつう'));
+ok('受付画面に待ち時間の目安', s.text().includes('目安 20分くらい'), s.text().slice(0, 300));
 s.click('ホームにもどる'); await sleep(400);
 ok('自分の依頼に表示', s.text().includes('#1') && s.text().includes('類題演習用'));
+ok('自分の依頼に「次はあなたの番」と目安', s.text().includes('次はあなたの番です') && s.text().includes('目安 20分くらい'), s.$('#myList').textContent.slice(0, 200));
 
 console.log('--- 生徒画面: 質問（シンキング確認）');
 s.click('✋ 質問したい'); await sleep(50);
@@ -247,6 +249,10 @@ ok('生徒側に「向かっています」と担当名', s1.text().includes('�
 t.click('対応中'); await sleep(100);
 t.click('完了にする', t.$('#req-1')); await sleep(600);
 ok('1タップで完了（メモ画面は出ない）', !t.$('.modal') && !t.$('#req-1'));
+{
+  const s1b = load('index.html'); await sleep(400);
+  ok('完了したら生徒側に「できたよ」', s1b.$('.ready') && s1b.$('.ready').textContent.includes('できたよ') && s1b.$('.ready').textContent.includes('プリントを渡しました'), s1b.$('#myList').textContent.slice(0, 200));
+}
 ok('元に戻すの帯', t.$('#undoBar') && t.$('#undoBar').textContent.includes('田中 健') && t.$('#undoBar').textContent.includes('元に戻す'), t.$('#undoBar') && t.$('#undoBar').textContent);
 t.click('元に戻す', t.$('#undoBar')); await sleep(900);
 ok('元に戻すと対応中に戻る（担当も）', t.$('#req-1') && t.$('#req-1').classList.contains('in_progress') && t.$('#req-1').textContent.includes('担当 山田'), t.$('#list').textContent.slice(0, 200));

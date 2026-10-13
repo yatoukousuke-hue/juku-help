@@ -113,16 +113,32 @@
     if (r.content) parts.push(r.content);
     return parts.map(esc).join('　');
   }
+  // 待ち時間の目安（前に待っている人数から。config の WAIT_GUIDE）
+  function waitGuide(ahead) { const g = (C.WAIT_GUIDE || []).find((x) => ahead <= x.maxAhead); return g ? g.text : ''; }
+  // 状態が変わったら知らせる（画面を開いている間だけ。iPhone では振動しない）
+  const lastStatus = new Map();
+  function noticeChanges(list) {
+    let ready = false, coming = false;
+    list.forEach((r) => { const before = lastStatus.get(r.id); if (before && before !== r.status) { if (r.status === 'done') ready = true; if (r.status === 'in_progress') coming = true; } lastStatus.set(r.id, r.status); });
+    if (ready || coming) { try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (e) { /* 振動できない端末 */ } }
+    if (ready) toast('できたよ！', 'ok');
+  }
   function reqCard(r, allowCancel) {
     const st = r.status;
-    const ahead = st === 'waiting' ? (r.ahead === 0 ? '次はあなたの番です' : `あと ${r.ahead} 人待ち`) : st === 'in_progress' ? '対応中' : st === 'done' ? `完了 ${fmtTime(r.done_at)}` : '取り消しました';
+    const guide = st === 'waiting' ? waitGuide(r.ahead || 0) : '';
+    const ahead = st === 'waiting' ? `<div class="wait">${r.ahead === 0 ? '次はあなたの番です' : `あと ${r.ahead} 人待ち`}${guide ? `<span class="guide">・目安 ${esc(guide)}</span>` : ''}</div>`
+      : `<div class="line2">${st === 'in_progress' ? '対応中' : st === 'done' ? `完了 ${fmtTime(r.done_at)}` : '取り消しました'}</div>`;
+    const tip = st === 'waiting' && (r.ahead || 0) >= (C.WAIT_TIP_AHEAD || 99) && C.WAIT_TIP_TEXT ? `<div class="tip">💡 ${esc(C.WAIT_TIP_TEXT)}</div>` : '';
     const coming = st === 'in_progress' ? `<div class="coming">🏃 ${r.teacher ? esc(r.teacher) + '先生' : '先生'}が向かっています。席で待っていてください</div>` : '';
+    const ready = st === 'done' && JH.minutesSince(r.done_at) < (C.READY_SHOW_MIN || 15)
+      ? `<div class="ready"><div class="t">🎉 できたよ！</div><div class="s">${r.kind === 'print' ? 'プリントを渡しました。まだ受け取っていなければ、先生に声をかけてね' : '質問の対応が終わりました'}</div></div>` : '';
     return `<div class="myreq" data-id="${r.id}">
-      ${coming}
+      ${coming}${ready}
       <div class="line1"><span>#${r.receipt_no}</span><span>${KIND_ICON[r.kind]} ${esc(r.subject)} ${KIND_LABEL[r.kind]}</span>
         ${r.urgency === 'now' ? '<span class="badge now">早めに</span>' : ''}<span class="spacer"></span><span class="badge ${st}">${STATUS_LABEL[st]}</span></div>
       <div class="line2">${reqDetail(r)}</div>
-      <div class="line2">${ahead}　・　送信 ${fmtTime(r.created_at)}（${elapsedText(r.created_at)}前）</div>
+      ${ahead}${tip}
+      <div class="line2">送信 ${fmtTime(r.created_at)}（${elapsedText(r.created_at)}前）</div>
       ${allowCancel && st === 'waiting' ? `<div><button class="btn danger sm" data-cancel="${r.id}">${armedCancel.id === r.id && Date.now() < armedCancel.until ? '本当に取り消す（もう一度押す）' : '取り消す'}</button></div>` : ''}
     </div>`;
   }
@@ -131,6 +147,7 @@
       myList = await api.myRequests(DEV);
       const box = $('#myList'); if (!box) return;
       const today = myList.filter((r) => r.status !== 'cancelled' || JH.minutesSince(r.done_at) < 10);
+      noticeChanges(today);
       box.innerHTML = today.length ? today.map((r) => reqCard(r, true)).join('') : '<div class="muted small">まだ依頼はありません</div>';
       bindCancel(box);
     } catch (e) { const box = $('#myList'); if (box) box.innerHTML = `<div class="small" style="color:var(--danger)">${esc(errorText(e))}</div>`; }
@@ -158,6 +175,7 @@
     try {
       const r = await api.requestByReceipt(no);
       if (!r) { box.innerHTML = '<div class="muted small">今日の受付番号にその番号はありません</div>'; return; }
+      noticeChanges([r]);
       box.innerHTML = `<div class="small muted">${esc(r.student_name)} さんの依頼</div>` + reqCard(r, true);
       bindCancel(box);
       lastReceipt = no;
@@ -374,6 +392,7 @@
         <div class="muted mt">受付番号</div>
         <div class="big-no">${r.receipt_no}</div>
         <div class="pos">いま <b>${r.position}</b> 番目です</div>
+        ${waitGuide(Math.max(0, r.position - 1)) ? `<div class="guide">目安 ${esc(waitGuide(Math.max(0, r.position - 1)))}（混み具合で前後します）</div>` : ''}
         <div class="muted small mt">${esc(r.student_name)}さん${r.school ? `（${esc(r.school)}）` : ''}・${esc(r.classroom)}・${esc(r.subject)} ${KIND_LABEL[r.kind]}</div>
         <div class="muted small">${reqDetail(r)}</div>
         ${mode === 'shared' ? '<div class="small mt" style="color:var(--warn);font-weight:700">状態を確認するときは、この受付番号をおぼえておいてください</div>' : ''}

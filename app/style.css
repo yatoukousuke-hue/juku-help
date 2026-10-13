@@ -118,6 +118,13 @@ label.lbl { display: block; font-weight: 700; margin: 12px 0 6px; }
 .myreq .line2 { color: var(--muted); font-size: .9rem; }
 .myreq .coming { background: var(--ok-soft); color: var(--ok); font-weight: 800; padding: 10px 12px; border-radius: 10px; animation: flash-ok 1.2s ease-in-out infinite alternate; }
 @keyframes flash-ok { from { box-shadow: 0 0 0 0 rgba(22, 163, 74, .35); } to { box-shadow: 0 0 0 5px rgba(22, 163, 74, 0); } }
+.myreq .wait { font-size: 1.15rem; font-weight: 800; color: var(--text); }
+.myreq .wait .guide { color: var(--primary); }
+.myreq .tip { background: var(--primary-soft); color: var(--primary-dark); border-radius: 10px; padding: 8px 12px; font-size: .9rem; font-weight: 700; }
+.myreq .ready { background: var(--ok); color: #fff; border-radius: 12px; padding: 14px; text-align: center; animation: flash-ok 1.2s ease-in-out infinite alternate; }
+.myreq .ready .t { font-size: 1.5rem; font-weight: 900; }
+.myreq .ready .s { font-size: .9rem; font-weight: 700; opacity: .95; }
+.receipt .guide { font-size: 1.05rem; font-weight: 700; color: var(--primary); margin-top: 4px; }
 .nudge { background: var(--warn-soft); border: 2px solid #f5d78a; color: #6b4d00; border-radius: 12px; padding: 12px 14px; margin-top: 10px; font-weight: 700; }
 .nudge .small { font-weight: 400; }
 .checkrow { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }

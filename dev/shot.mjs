@@ -32,8 +32,9 @@ await page.emulate({ viewport: { width: 390, height: 844, deviceScaleFactor: 2, 
 const base = 'http://localhost:8767/';
 const shot = async (url, name, full = true) => { await page.goto(base + url, { waitUntil: 'networkidle0' }); await new Promise((r) => setTimeout(r, 900)); await page.screenshot({ path: path.join(shots, name), fullPage: full }); console.log('shot', name); };
 
+const errs = []; page.on('pageerror', (e) => errs.push(e.message));
 await page.goto(base + 'seed.html', { waitUntil: 'networkidle0' });
-await new Promise((r) => setTimeout(r, 1500));
+await page.waitForFunction(() => document.body.textContent.startsWith('seeded'), { timeout: 15000 }).catch(() => console.log('seed timeout', errs.join(' | ')));
 console.log('seed:', await page.evaluate(() => document.body.textContent));
 const targets = process.argv.slice(2);
 const all = [
@@ -59,6 +60,12 @@ if (!targets.length || targets.some((t) => '15_teacher_select.png 16_teacher_und
   await page.evaluate(() => { const b = document.querySelector('.req .actions .btn.ok'); if (b) b.click(); });
   await new Promise((r) => setTimeout(r, 800));
   await page.screenshot({ path: path.join(shots, '16_teacher_undo.png'), fullPage: false }); console.log('shot 16_teacher_undo.png');
+}
+// 生徒の端末（田中: 1枚目は完了＝「できたよ」、2枚目は待ち＝目安）
+if (!targets.length || targets.some((t) => '23_student_wait.png'.includes(t))) {
+  await page.goto(base + 'index.html', { waitUntil: 'networkidle0' });
+  await page.evaluate(() => localStorage.setItem('jh_device_id', 'd-001'));
+  await shot('index.html', '23_student_wait.png', false);
 }
 await browser.close();
 server.close();

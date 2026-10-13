@@ -39,6 +39,7 @@
   const db = JSON.parse(localStorage.getItem('jh_local_db_v1'));
   const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
   db.requests.forEach((r, i) => { r.created_at = ago([25, 12, 9, 30, 40, 6, 3][i] || 5); if (r.started_at) r.started_at = ago(4); if (r.done_at) r.done_at = ago(2); });
+  db.requests[6].device_id = 'd-001'; // 田中の2枚目も同じ端末から（生徒画面の見本用）
   localStorage.setItem('jh_local_db_v1', JSON.stringify(db));
   document.body.textContent = 'seeded ' + db.requests.length;
 })();

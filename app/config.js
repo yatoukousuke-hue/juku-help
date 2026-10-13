@@ -93,6 +93,19 @@ window.APP_CONFIG = {
   // --- 講師画面を埋め込んでよいサイト（水谷教室運営アプリ）。ここに無いサイトからの合言葉は受け取らない ---
   EMBED_PARENT_ORIGINS: ["https://manabi-operations.vercel.app"],
 
+  // --- 生徒画面の「待ち時間の目安」（前に待っている人数 → 表示）。2026/9/26・27 の実データ（渡すまでの時間）から決めた値 ---
+  WAIT_GUIDE: [
+    { maxAhead: 2, text: "20分くらい" },
+    { maxAhead: 5, text: "30分くらい" },
+    { maxAhead: 14, text: "1時間くらい" },
+    { maxAhead: 9999, text: "1時間以上" },
+  ],
+  // この人数以上待っているときは、待ち時間の使い方をすすめる
+  WAIT_TIP_AHEAD: 6,
+  WAIT_TIP_TEXT: "待っている間に、ワークやテスト形式の問題を進めておこう",
+  // 「できたよ」を大きく出しておく時間（分）
+  READY_SHOW_MIN: 15,
+
   // --- 自動更新の間隔（秒） ---
   REFRESH_SEC_TEACHER: 5,
   REFRESH_SEC_STUDENT: 10,

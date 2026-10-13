@@ -14,6 +14,19 @@
   .unit-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; max-height: 160px; overflow: auto; }
   .unit-chips .chip { padding: 6px 10px; font-size: .85rem; min-width: 0; }
   .unit-chips .chip .n { color: var(--muted); font-weight: 400; margin-left: 4px; }
+  .ctl .search { margin-top: 10px; }
+  .ublocks { margin-top: 8px; display: grid; gap: 6px; }
+  .ublock { border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+  .ublock > summary { list-style: none; cursor: pointer; padding: 10px 12px; display: flex; align-items: center; gap: 8px; font-weight: 700; flex-wrap: wrap; }
+  .ublock > summary::-webkit-details-marker { display: none; }
+  .ublock > summary::before { content: '▸'; color: var(--muted); }
+  .ublock[open] > summary::before { content: '▾'; }
+  .ublock > summary .n { color: var(--muted); font-weight: 400; font-size: .8rem; }
+  .ublock > summary .on { margin-left: auto; font-size: .75rem; color: var(--primary-dark); background: var(--primary-soft); border-radius: 99px; padding: 2px 8px; }
+  .ublock .unit-chips { padding: 0 10px 10px; margin: 0; max-height: none; }
+  .unit-chips .chip.all { border-style: dashed; }
+  .range { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--primary-soft); color: var(--primary-dark); font-weight: 700; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .range .names { flex: 1 1 200px; font-size: 1.05rem; }
   .note { font-size: .8rem; color: var(--muted); }
 
   /* ---- A4 の紙（北辰テストに近い見た目） ---- */
@@ -69,21 +82,28 @@
 <script>
 (function () {
   'use strict';
-  const { $, $$, esc, todayYmd, errorText, toast, store, api } = window.JH;
+  const { $, $$, esc, todayYmd, errorText, store, api } = window.JH;
   const C = window.APP_CONFIG;
   const app = $('#app');
   const qs = new URLSearchParams(location.search);
   let pass = store.get('jh_tpass', '');
   let bank = [];
   let seed = 1;
-  const st = { grade: qs.get('grade') || '', subject: qs.get('subject') || '', school: qs.get('school') || '', unit: qs.get('unit') || '', count: 10, mix: 'auto', withAnswers: true };
+  const SEP = '\u0001';
+  const OTHER = 'その他';
+  // sel = 選んだ「単元 + 小単元」の組（テスト範囲）。textQ = 問題文で探したときの言葉
+  const st = { grade: qs.get('grade') || '', subject: qs.get('subject') || '', school: qs.get('school') || '', sel: new Set(), textQ: '', search: '', count: 10, mix: 'auto', withAnswers: true };
+  let wantParam = qs.get('unit') || '';
+  const open = new Set();
 
   JH.demoBanner();
 
   // ---- 単元名の照合（講師画面と同じ考え方：書き方の違いをそろえる） ----
   const KANJI_NUM = { '一': '1', '二': '2', '三': '3' };
-  const norm = (s) => String(s || '').normalize('NFKC').replace(/[\s　]/g, '').toLowerCase().replace(/([一二三])(次|元)/g, (m, a, b) => KANJI_NUM[a] + b).replace(/連立(?!方程式)/g, '連立方程式');
-  const unitMatch = (bankUnit, want) => { const a = norm(bankUnit), b = norm(want); return !!b && (a === b || a.includes(b) || b.includes(a)); };
+  const norm = (s) => String(s || '').normalize('NFKC').replace(/[\s　「」『』()（）・、,]/g, '').toLowerCase().replace(/([一二三])(次|元)/g, (m, a, b) => KANJI_NUM[a] + b).replace(/連立(?!方程式)/g, '連立方程式');
+  const has = (a, b) => { a = norm(a); b = norm(b); return !!a && !!b && (a === b || a.includes(b) || b.includes(a)); };
+  const subOf = (q) => q.subunit || OTHER;
+  const keyOf = (q) => q.unit + SEP + subOf(q);
 
   // ---- ログイン（講師画面と同じ合言葉） ----
   function renderLogin(msg) {
@@ -99,38 +119,97 @@
     app.innerHTML = '<div class="card muted small">予想問題のストックを読み込み中…</div>';
     try { bank = (await api.teacherExamQuestions(pass)).filter((q) => !q.hidden && q.kind !== 'pattern'); }
     catch (e) { if (String(e.message).includes('BAD_PASS')) { store.del('jh_tpass'); return renderLogin('合言葉が変わったようです。'); } return (app.innerHTML = `<div class="card" style="color:var(--danger)">${esc(errorText(e))}</div>`); }
+    applyWant();
     render();
   }
 
-  // ---- 問題の選び方: よく出る順、同じパターンが続かないように、難易度のバランスを見て ----
+  // 学年・教科で絞ったストック
+  const scoped = () => bank.filter((q) => (!st.grade || q.grade === st.grade) && (!st.subject || q.subject === st.subject));
+
+  // 単元 → 小単元 の一覧（ストックに入っている順＝教科書の順に近い）
+  function tree() {
+    const units = new Map();
+    scoped().forEach((q) => {
+      if (!units.has(q.unit)) units.set(q.unit, { unit: q.unit, n: 0, subs: new Map() });
+      const u = units.get(q.unit); u.n++;
+      u.subs.set(subOf(q), (u.subs.get(subOf(q)) || 0) + 1);
+    });
+    units.forEach((u) => { if (u.subs.has(OTHER) && u.subs.size > 1) { const n = u.subs.get(OTHER); u.subs.delete(OTHER); u.subs.set(OTHER, n); } });
+    return [...units.values()];
+  }
+
+  // URL や講師画面から来た「単元名」（生徒が書いたもの）を、小単元 → 単元の順で当てる
+  function applyWant() {
+    if (!wantParam || !st.grade || !st.subject) return;
+    const w = wantParam; wantParam = '';
+    const t = tree();
+    const subHits = [];
+    t.forEach((u) => u.subs.forEach((n, s) => { if (s !== OTHER && has(s, w)) subHits.push(u.unit + SEP + s); }));
+    if (subHits.length) { subHits.forEach((k) => st.sel.add(k)); return; }
+    const unitHits = t.filter((u) => has(u.unit, w));
+    if (unitHits.length) { unitHits.forEach((u) => u.subs.forEach((n, s) => st.sel.add(u.unit + SEP + s))); return; }
+    st.search = w;
+  }
+
+  // ---- 問題の選び方: よく出る順、同じパターンが続かないように、難易度と小単元のバランスを見て ----
   function rand(n) { seed = (seed * 9301 + 49297) % 233280; return Math.floor((seed / 233280) * n); }
+  function poolNow() {
+    if (st.textQ) return scoped().filter((q) => has(q.question + ' ' + (q.topic || '') + ' ' + (q.subunit || ''), st.textQ) || norm(q.question).includes(norm(st.textQ)));
+    return scoped().filter((q) => st.sel.has(keyOf(q)));
+  }
   function pick() {
-    let pool = bank.filter((q) => (!st.grade || q.grade === st.grade) && (!st.subject || q.subject === st.subject) && unitMatch(q.unit, st.unit));
+    const pool = poolNow();
     if (!pool.length) return [];
-    // 学校が合うものを少し優先
     const score = (q) => (q.frequency || 1) * 10 + ((st.school && (q.schools || []).includes(st.school)) ? 15 : 0) + rand(8);
     const want = st.mix === 'basic' ? { basic: .5, standard: .4, advanced: .1 } : st.mix === 'advanced' ? { basic: .2, standard: .4, advanced: .4 } : { basic: .3, standard: .5, advanced: .2 };
     const byLevel = { basic: [], standard: [], advanced: [] };
     pool.map((q) => ({ q, s: score(q) })).sort((a, b) => b.s - a.s).forEach(({ q }) => (byLevel[q.level || 'standard'] || byLevel.standard).push(q));
+    // 小単元を複数選んだときは、どの小単元からも出るように順番に並べ替える
+    const spread = (list) => { const m = new Map(); list.forEach((q) => { const k = keyOf(q); if (!m.has(k)) m.set(k, []); m.get(k).push(q); }); const out = []; let more = true; for (let i = 0; more; i++) { more = false; m.forEach((l) => { if (l[i]) { out.push(l[i]); more = true; } }); } return out; };
+    Object.keys(byLevel).forEach((lv) => { byLevel[lv] = spread(byLevel[lv]); });
     const n = Math.min(st.count, pool.length);
     const out = []; const usedTopic = new Map();
     const take = (lv, k) => { const list = byLevel[lv]; for (let i = 0; i < list.length && k > 0; i++) { const q = list[i]; if (out.includes(q)) continue; const t = q.topic || q.id; if ((usedTopic.get(t) || 0) >= 2 && list.length > k + i) continue; out.push(q); usedTopic.set(t, (usedTopic.get(t) || 0) + 1); k--; } };
     ['basic', 'standard', 'advanced'].forEach((lv) => take(lv, Math.round(n * want[lv])));
-    // 足りない分はよく出る順で埋める
-    pool.slice().sort((a, b) => score(b) - score(a)).forEach((q) => { if (out.length < n && !out.includes(q)) out.push(q); });
-    // 易しい順に並べ、大問を「基本・標準・活用」にまとめる（1つの大問は6問まで）
+    spread(pool.slice().sort((a, b) => score(b) - score(a))).forEach((q) => { if (out.length < n && !out.includes(q)) out.push(q); });
     const order = { basic: 0, standard: 1, advanced: 2 };
-    out.sort((a, b) => (order[a.level || 'standard'] - order[b.level || 'standard']) || String(a.topic).localeCompare(String(b.topic), 'ja'));
-    const LEAD = { basic: '次の問いに答えなさい。【基本】', standard: '次の問いに答えなさい。【標準】', advanced: '次の問いに答えなさい。【活用】' };
+    const byLv = (a, b) => (order[a.level || 'standard'] - order[b.level || 'standard']) || String(a.topic).localeCompare(String(b.topic), 'ja');
+    const subs = [...new Set(out.map(keyOf))];
     const groups = [];
-    out.forEach((q) => { const lv = q.level || 'standard'; let g = groups[groups.length - 1]; if (!g || g.lv !== lv || g.items.length >= 6) { g = { lv, lead: LEAD[lv], items: [] }; groups.push(g); } g.items.push(q); });
+    if (subs.length >= 2 && subs.length <= 5) {
+      // 小単元（作品）ごとに大問を分ける：大問1 枕草子、大問2 平家物語 …
+      subs.forEach((k) => {
+        const items = out.filter((q) => keyOf(q) === k).sort(byLv);
+        const nm = k.split(SEP)[1] === OTHER ? k.split(SEP)[0] : k.split(SEP)[1];
+        for (let i = 0; i < items.length; i += 6) groups.push({ lead: `【${nm}】次の問いに答えなさい。`, items: items.slice(i, i + 6) });
+      });
+    } else {
+      // 易しい順に並べ、大問を「基本・標準・活用」にまとめる（1つの大問は6問まで）
+      out.sort(byLv);
+      const LEAD = { basic: '次の問いに答えなさい。【基本】', standard: '次の問いに答えなさい。【標準】', advanced: '次の問いに答えなさい。【活用】' };
+      out.forEach((q) => { const lv = q.level || 'standard'; let g = groups[groups.length - 1]; if (!g || g.lv !== lv || g.items.length >= 6) { g = { lv, lead: LEAD[lv], items: [] }; groups.push(g); } g.items.push(q); });
+    }
     return groups;
   }
+
+  // テスト範囲の名前（タイトル用）。単元を丸ごと選んだら単元名、一部なら小単元名
+  function rangeNames() {
+    if (st.textQ) return [`「${st.textQ}」を含む問題`];
+    const names = [];
+    tree().forEach((u) => {
+      const picked = [...u.subs.keys()].filter((s) => st.sel.has(u.unit + SEP + s));
+      if (!picked.length) return;
+      if (picked.length === u.subs.size && u.subs.size > 1) names.push(u.unit);
+      else picked.forEach((s) => names.push(s === OTHER ? u.unit : s));
+    });
+    return names;
+  }
+  function rangeTitle() { const n = rangeNames(); return n.length <= 3 ? n.join('・') : n.slice(0, 3).join('・') + ` ほか${n.length - 3}`; }
 
   function sheetHtml(groups, answers) {
     let n = 0;
     const school = st.school ? `${st.school}中` : '';
-    const title = `定期テスト予想問題　${esc(st.grade)} ${esc(st.subject)}「${esc(st.unit)}」`;
+    const title = `定期テスト予想問題　${esc(st.grade)} ${esc(st.subject)}「${esc(rangeTitle())}」`;
     const body = groups.map((g) => {
       n++;
       return `<div class="daimon"><div class="dt"><span class="no">${n}</span><span class="lead">${esc(g.lead)}</span></div>
@@ -149,10 +228,39 @@
     </div>`;
   }
 
+  function unitsHtml() {
+    if (!st.grade || !st.subject) return '<div class="note mt">学年と教科を選ぶと、作れる単元・小単元が出ます。</div>';
+    const t = tree();
+    if (!t.length) return '<div class="note mt">この学年・教科のストックはまだありません。</div>';
+    const q = st.search;
+    const blocks = t.map((u) => {
+      const unitHit = !q || has(u.unit, q);
+      const subs = [...u.subs.entries()].filter(([s]) => unitHit || (s !== OTHER && has(s, q)));
+      if (!subs.length) return '';
+      const onN = [...u.subs.keys()].filter((s) => st.sel.has(u.unit + SEP + s)).length;
+      const allOn = onN === u.subs.size;
+      const isOpen = open.has(u.unit) || !!q || onN > 0;
+      return `<details class="ublock" data-unit="${esc(u.unit)}" ${isOpen ? 'open' : ''}>
+        <summary>${esc(u.unit)}<span class="n">${u.n}問・${u.subs.size}項目</span>${onN ? `<span class="on">${allOn ? '全部' : onN + '個'}選択中</span>` : ''}</summary>
+        <div class="unit-chips">
+          ${u.subs.size > 1 && unitHit ? `<button class="chip all ${allOn ? 'selected' : ''}" data-all="${esc(u.unit)}">この単元を全部<span class="n">${u.n}問</span></button>` : ''}
+          ${subs.map(([s, c]) => `<button class="chip ${st.sel.has(u.unit + SEP + s) ? 'selected' : ''}" data-k="${esc(u.unit + SEP + s)}">${esc(s)}<span class="n">${c}問</span></button>`).join('')}
+        </div></details>`;
+    }).join('');
+    if (blocks.trim()) return `<div class="ublocks">${blocks}</div>`;
+    const hit = scoped().filter((x) => norm(x.question).includes(norm(q))).length;
+    return `<div class="note mt">「${esc(q)}」という単元・小単元はありません。</div>`
+      + (hit ? `<button class="btn ghost sm mt" id="bText">問題文に「${esc(q)}」を含む ${hit}問 で作る</button>` : '');
+  }
+
+  function rangeHtml() {
+    const names = rangeNames();
+    if (!names.length) return '';
+    const n = poolNow().length;
+    return `<div class="range"><span class="names">テスト範囲：${esc(names.join('、'))}<span class="n" style="font-weight:400;font-size:.8rem">（ストック${n}問）</span></span><button class="btn ghost sm" id="bClear">範囲を消す</button></div>`;
+  }
+
   function render() {
-    const units = {};
-    bank.filter((q) => (!st.grade || q.grade === st.grade) && (!st.subject || q.subject === st.subject)).forEach((q) => { units[q.unit] = (units[q.unit] || 0) + 1; });
-    const unitList = Object.entries(units).sort((a, b) => b[1] - a[1]);
     app.innerHTML = `
       <div class="topbar noprint"><div><h1>📝 定期テスト予想問題</h1><div class="sub">過去の定期テストで「よく出る形」から作った問題で、A4 のテストを組み立てます</div></div>
         <a class="btn ghost sm" href="teacher.html${qs.get('embed') ? '?embed=1' : ''}">← 講師画面</a></div>
@@ -162,38 +270,54 @@
           <select id="sSubject"><option value="">教科</option>${C.SUBJECTS.filter((x) => x !== 'その他').map((x) => `<option ${st.subject === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
           <select id="sSchool"><option value="">全学校</option>${C.SCHOOLS.map((x) => `<option ${st.school === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
         </div>
-        <label class="lbl">単元</label>
-        <input class="input" id="sUnit" placeholder="例: 一次関数" value="${esc(st.unit)}">
-        <div class="unit-chips">${unitList.length ? unitList.map(([u, c]) => `<button class="chip ${unitMatch(u, st.unit) && st.unit ? 'selected' : ''}" data-u="${esc(u)}">${esc(u)}<span class="n">${c}問</span></button>`).join('') : `<span class="note">${st.grade && st.subject ? 'この学年・教科のストックはまだありません。' : '学年と教科を選ぶと、作れる単元が出ます。'}</span>`}</div>
+        <input class="input search" id="sSearch" type="search" placeholder="作品名・小単元で探す（例：枕草子、連立、比較）" value="${esc(st.search)}">
+        <div id="units">${unitsHtml()}</div>
+        <div id="range">${rangeHtml()}</div>
         <div class="row mt">
           <select id="sCount">${[6, 8, 10, 12, 15].map((n) => `<option value="${n}" ${st.count === n ? 'selected' : ''}>${n}問</option>`).join('')}</select>
           <select id="sMix"><option value="auto" ${st.mix === 'auto' ? 'selected' : ''}>難易度：ふつう</option><option value="basic" ${st.mix === 'basic' ? 'selected' : ''}>基礎多め</option><option value="advanced" ${st.mix === 'advanced' ? 'selected' : ''}>応用多め</option></select>
           <label class="small" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="sAns" ${st.withAnswers ? 'checked' : ''}> 解答も印刷</label>
         </div>
         <div class="row mt"><button class="btn" id="bMake">作成</button><button class="btn ghost" id="bRemake">🔀 作り直す</button><button class="btn ghost" id="bPrint">🖨 印刷</button></div>
-        <div class="note mt">★は過去問で3回以上出た形です（印刷には出ません）。ストックに無い単元は、Claude に「○年○○の△△の予想問題を追加して」と頼んでください。</div>
+        <div class="note mt">小単元（作品名）はいくつでも選べます。選んだものをまとめて1枚のテストにします。★は過去問で3回以上出た形です（印刷には出ません）。ストックに無いものは、Claude に「○年○○の△△の予想問題を追加して」と頼んでください。</div>
       </div>
       <div class="paper-wrap" id="out"></div>`;
-    $('#sGrade').onchange = (e) => { st.grade = e.target.value; render(); };
-    $('#sSubject').onchange = (e) => { st.subject = e.target.value; render(); };
-    $('#sSchool').onchange = (e) => { st.school = e.target.value; };
-    $('#sUnit').addEventListener('change', (e) => { st.unit = e.target.value.trim(); });
-    $$('[data-u]').forEach((b) => b.onclick = () => { st.unit = b.dataset.u; render(); make(); });
-    $('#sCount').onchange = (e) => { st.count = Number(e.target.value); };
-    $('#sMix').onchange = (e) => { st.mix = e.target.value; };
+    $('#sGrade').onchange = (e) => { st.grade = e.target.value; st.sel.clear(); st.textQ = ''; render(); };
+    $('#sSubject').onchange = (e) => { st.subject = e.target.value; st.sel.clear(); st.textQ = ''; render(); };
+    $('#sSchool').onchange = (e) => { st.school = e.target.value; if (hasRange()) make(); };
+    $('#sSearch').addEventListener('input', (e) => { st.search = e.target.value.trim(); refreshUnits(); });
+    $('#sCount').onchange = (e) => { st.count = Number(e.target.value); if (hasRange()) make(); };
+    $('#sMix').onchange = (e) => { st.mix = e.target.value; if (hasRange()) make(); };
     $('#sAns').onchange = (e) => { st.withAnswers = e.target.checked; document.body.classList.toggle('with-answers', st.withAnswers); };
     document.body.classList.toggle('with-answers', st.withAnswers);
-    $('#bMake').onclick = () => { st.unit = $('#sUnit').value.trim(); make(); };
-    $('#bRemake').onclick = () => { seed = (seed * 7 + 13) % 233280 || 1; st.unit = $('#sUnit').value.trim(); make(); };
+    $('#bMake').onclick = () => make();
+    $('#bRemake').onclick = () => { seed = (seed * 7 + 13) % 233280 || 1; make(); };
     $('#bPrint').onclick = () => window.print();
-    if (st.unit && st.grade && st.subject) make();
+    bindUnits();
+    if (hasRange()) make(); else $('#out').innerHTML = '';
+  }
+
+  const hasRange = () => !!(st.textQ || st.sel.size);
+  // 単元の一覧とテスト範囲だけ描き直す（検索欄の入力中にキーボードが閉じないように）
+  function refreshUnits() { $('#units').innerHTML = unitsHtml(); $('#range').innerHTML = rangeHtml(); bindUnits(); }
+  function changed() { refreshUnits(); make(); }
+  function bindUnits() {
+    $$('details.ublock').forEach((d) => d.addEventListener('toggle', () => { if (d.open) open.add(d.dataset.unit); else open.delete(d.dataset.unit); }));
+    $$('[data-k]').forEach((b) => b.onclick = () => { st.textQ = ''; const k = b.dataset.k; if (st.sel.has(k)) st.sel.delete(k); else st.sel.add(k); open.add(k.split(SEP)[0]); changed(); });
+    $$('[data-all]').forEach((b) => b.onclick = () => {
+      st.textQ = ''; const u = tree().find((x) => x.unit === b.dataset.all); if (!u) return;
+      const keys = [...u.subs.keys()].map((s) => u.unit + SEP + s); const allOn = keys.every((k) => st.sel.has(k));
+      keys.forEach((k) => (allOn ? st.sel.delete(k) : st.sel.add(k))); open.add(u.unit); changed();
+    });
+    if ($('#bText')) $('#bText').onclick = () => { st.sel.clear(); st.textQ = st.search; changed(); };
+    if ($('#bClear')) $('#bClear').onclick = () => { st.sel.clear(); st.textQ = ''; changed(); };
   }
 
   function make() {
     const out = $('#out');
-    if (!st.grade || !st.subject || !st.unit) { out.innerHTML = '<div class="card note">学年・教科・単元を選んでください。</div>'; return; }
+    if (!st.grade || !st.subject || !hasRange()) { out.innerHTML = '<div class="card note">学年・教科を選び、単元か小単元（作品名）を押してください。</div>'; return; }
     const groups = pick();
-    if (!groups.length) { out.innerHTML = `<div class="card">「${esc(st.unit)}」の予想問題はまだストックにありません。<div class="note mt">Claude に「${esc(st.grade)}${esc(st.subject)}の${esc(st.unit)}の予想問題を追加して」と頼むと追加できます。</div></div>`; return; }
+    if (!groups.length) { out.innerHTML = `<div class="card">選んだ範囲の予想問題はまだストックにありません。<div class="note mt">Claude に「${esc(st.grade)}${esc(st.subject)}の○○の予想問題を追加して」と頼むと追加できます。</div></div>`; return; }
     // 紙からはみ出したら、最後の問題から1問ずつ減らす（A4 1枚に収める）
     const overflow = () => { const p = out.querySelector('.paper'); return p && p.scrollHeight > p.clientHeight + 2; };
     let removed = 0;
@@ -206,7 +330,9 @@
     };
     draw();
     while (overflow() && groups.reduce((a, g) => a + g.items.length, 0) > 3) {
-      const last = groups[groups.length - 1]; last.items.pop(); if (!last.items.length) groups.pop();
+      // 一番多い大問から1問減らす（どの小単元も残るように）
+      let gi = 0; groups.forEach((g, i) => { if (g.items.length >= groups[gi].items.length) gi = i; });
+      groups[gi].items.pop(); if (!groups[gi].items.length) groups.splice(gi, 1);
       removed++; draw();
     }
   }

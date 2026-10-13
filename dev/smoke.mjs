@@ -371,9 +371,35 @@ console.log('--- 予想問題');
   ok('解答ページ', papers[1].textContent.includes('y = 2x + 1') && papers[1].textContent.includes('【解答】'));
   ok('図つきの問題には図', !!papers[0].querySelector('.fig svg'));
   ok('よく出る印（画面だけ）', [...papers[0].querySelectorAll('.star')].some((x) => x.textContent.includes('6回')) && papers[0].querySelector('.star').classList.contains('noprint'));
-  ok('作れる単元のボタン', y.$('.unit-chips').textContent.includes('一次関数') && y.$('.unit-chips').textContent.includes('3問'));
-  y.setVal('#sUnit', '確率'); y.$('#sUnit').dispatchEvent(new y.w.Event('change')); y.click('作成'); await sleep(100);
-  ok('ストックに無い単元は案内', y.$('#out').textContent.includes('まだストックにありません'));
+  ok('作れる単元のボタン', y.$('#units').textContent.includes('一次関数') && y.$('#units').textContent.includes('3問'));
+  ok('テスト範囲の表示', y.$('.range').textContent.includes('一次関数'));
+  // 小単元（作品名）で選ぶ
+  await tt.w.JH.api.teacherImportExamQuestions('sensei', 'test-koku2', [
+    ...[1, 2, 3].map((i) => ({ subject: '国語', grade: '中2', unit: '古典（古文・漢文）', subunit: '枕草子', level: 'basic', question: `枕草子の問題${i}`, answer: `答${i}` })),
+    ...[1, 2].map((i) => ({ subject: '国語', grade: '中2', unit: '古典（古文・漢文）', subunit: '平家物語（扇の的）', level: 'standard', question: `平家物語の問題${i}`, answer: `答${i}` })),
+    { subject: '国語', grade: '中2', unit: '古典（古文・漢文）', subunit: '徒然草', question: '徒然草の問題', answer: '答' },
+    { subject: '国語', grade: '中2', unit: '物語文の読解', subunit: '走れメロス', question: 'メロスの問題（城の場面）', answer: '答' },
+  ]);
+  const k = load('yosou.html?grade=中2&subject=国語&unit=枕草子'); await sleep(600);
+  let kp = k.w.document.querySelector('.paper');
+  ok('「枕草子」で枕草子だけのテスト', kp && kp.querySelectorAll('.sq').length === 3 && !kp.textContent.includes('平家物語の問題') && kp.querySelector('.ttl').textContent.includes('「枕草子」'), k.text().slice(0, 300));
+  k.click('平家物語（扇の的）', k.$('#units')); await sleep(100);
+  kp = k.w.document.querySelector('.paper');
+  ok('小単元を足すと2つの大問', kp && kp.querySelectorAll('.daimon').length === 2 && kp.textContent.includes('【平家物語（扇の的）】') && kp.querySelector('.ttl').textContent.includes('枕草子・平家物語'), kp && kp.querySelector('.ttl').textContent + '|' + kp.querySelectorAll('.daimon').length + '|' + [...kp.querySelectorAll('.lead')].map((x) => x.textContent).join('/'));
+  k.click('範囲を消す', k.$('#range')); await sleep(100);
+  ok('範囲を消すと空', !k.w.document.querySelector('.paper'));
+  k.setVal('#sSearch', 'メロス'); k.$('#sSearch').dispatchEvent(new k.w.Event('input')); await sleep(50);
+  ok('検索で小単元が絞られる', k.$('#units').textContent.includes('走れメロス') && !k.$('#units').textContent.includes('枕草子'));
+  k.setVal('#sSearch', '古典'); k.$('#sSearch').dispatchEvent(new k.w.Event('input')); await sleep(50);
+  k.click('この単元を全部', k.$('#units')); await sleep(100);
+  kp = k.w.document.querySelector('.paper');
+  ok('単元を丸ごと選ぶとタイトルは単元名', kp && kp.querySelector('.ttl').textContent.includes('古典（古文・漢文）') && kp.querySelectorAll('.sq').length === 6);
+  k.setVal('#sSearch', '城の場面'); k.$('#sSearch').dispatchEvent(new k.w.Event('input')); await sleep(50);
+  ok('当てはまる小単元が無ければ問題文で探せる', !!k.$('#bText'));
+  k.$('#bText').click(); await sleep(100);
+  ok('問題文で作る', k.w.document.querySelector('.paper').querySelectorAll('.sq').length === 1);
+  const y2 = load('yosou.html?grade=中2&subject=数学&unit=確率'); await sleep(600);
+  ok('ストックに無い単元は案内', y2.$('#units').textContent.includes('「確率」という単元・小単元はありません'));
   const t2 = load('teacher.html'); await sleep(600);
   ok('講師画面に「📝 予想問題」', !!t2.$('#bYosou'));
 }

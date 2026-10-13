@@ -221,7 +221,7 @@ await db.exec('reset role');
 
 console.log('\n-- 予想問題のストック');
 const eq = [
-  { subject: '数学', grade: '中2', schools: ['水谷'], unit: '一次関数', topic: '2点を通る直線の式', frequency: 5, level: 'standard', qtype: '計算', question: '2点(1, 3), (3, 7)を通る直線の式を求めなさい。', answer: 'y = 2x + 1', points: 5, source_label: '2023 2学期中間 水谷' },
+  { subject: '数学', grade: '中2', schools: ['水谷'], unit: '一次関数', subunit: '直線の式を求める', topic: '2点を通る直線の式', frequency: 5, level: 'standard', qtype: '計算', question: '2点(1, 3), (3, 7)を通る直線の式を求めなさい。', answer: 'y = 2x + 1', points: 5, source_label: '2023 2学期中間 水谷' },
   { subject: '数学', grade: '中2', unit: '一次関数', topic: '変化の割合', frequency: 3, level: 'basic', question: '一次関数 y = 3x - 2 の変化の割合を答えなさい。', answer: '3' },
   { subject: '数学', grade: '中2', unit: '', question: 'bad' },
 ];
@@ -229,6 +229,7 @@ const ei = await rpc('teacher_import_exam_questions', { p_pass: PASS, p_batch: '
 ok('exam questions imported 2 (bad skipped)', ei[0].imported === 2, JSON.stringify(ei));
 let eqs = (await rpc('teacher_exam_questions', { p_pass: PASS }))[0];
 ok('exam questions listed, frequency order', eqs.length === 2 && eqs[0].frequency === 5 && eqs[0].schools[0] === '水谷');
+ok('subunit stored', eqs[0].subunit === '直線の式を求める' && eqs[1].subunit === '');
 await rpc('teacher_import_exam_questions', { p_pass: PASS, p_batch: 'math-2', p_rows: JSON.stringify([eq[0]]) });
 eqs = (await rpc('teacher_exam_questions', { p_pass: PASS }))[0];
 ok('re-import replaces the batch', eqs.length === 1);

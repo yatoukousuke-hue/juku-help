@@ -129,6 +129,8 @@ create table if not exists public.exam_questions (
   hidden       boolean not null default false,
   created_at   timestamptz not null default now()
 );
+-- 小単元（作品名・単元の中の項目。例: 枕草子、一次関数のグラフ）
+alter table public.exam_questions add column if not exists subunit text not null default '';
 create index if not exists exam_questions_unit_idx on public.exam_questions (subject, grade, unit);
 alter table public.exam_questions enable row level security;
 revoke all on public.exam_questions from anon, authenticated;
@@ -639,9 +641,9 @@ begin
   delete from exam_questions where batch = p_batch;
   for v_r in select * from jsonb_array_elements(p_rows) loop
     if coalesce(v_r->>'subject','') = '' or coalesce(v_r->>'grade','') = '' or coalesce(v_r->>'unit','') = '' or coalesce(v_r->>'question','') = '' then continue; end if;
-    insert into exam_questions (kind, subject, grade, schools, unit, topic, frequency, level, qtype, question, answer, points, figure_svg, source_label, batch)
+    insert into exam_questions (kind, subject, grade, schools, unit, subunit, topic, frequency, level, qtype, question, answer, points, figure_svg, source_label, batch)
     values (coalesce(nullif(v_r->>'kind',''),'predicted'), v_r->>'subject', v_r->>'grade',
-            coalesce(array(select jsonb_array_elements_text(v_r->'schools')), '{}'), v_r->>'unit', coalesce(v_r->>'topic',''),
+            coalesce(array(select jsonb_array_elements_text(v_r->'schools')), '{}'), v_r->>'unit', coalesce(v_r->>'subunit',''), coalesce(v_r->>'topic',''),
             coalesce((v_r->>'frequency')::int, 1), nullif(v_r->>'level',''), coalesce(v_r->>'qtype',''), v_r->>'question',
             coalesce(v_r->>'answer',''), (v_r->>'points')::int, coalesce(v_r->>'figure_svg',''), coalesce(v_r->>'source_label',''), p_batch);
     v_n := v_n + 1;
@@ -661,6 +663,7 @@ begin
     question = coalesce(p_fields->>'question', question),
     answer   = coalesce(p_fields->>'answer', answer),
     unit     = coalesce(p_fields->>'unit', unit),
+    subunit  = coalesce(p_fields->>'subunit', subunit),
     level    = case when p_fields ? 'level' then nullif(p_fields->>'level','') else level end,
     hidden   = coalesce((p_fields->>'hidden')::boolean, hidden)
   where id = p_id returning * into v_q;

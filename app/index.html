@@ -40,8 +40,47 @@
 
   JH.demoBanner();
 
+  // ---- 埋め込み（水谷教室運営アプリの生徒ページの中で開く）: 親から生徒の名前を postMessage で受け取り、名前を自動で入れる ----
+  // 親は ?embed=student を付けて開く。受け取るのは決まった親（運営アプリ）からだけ。名前は保存しない（端末に残さない）。
+  const EMBED_ORIGINS = ['https://manabi-operations.vercel.app', 'http://localhost:3000', 'http://localhost:3123'];
+  const EMBED = new URLSearchParams(location.search).get('embed') === 'student' && window.parent !== window;
+  let embedStudent = null;                           // {name, grade, school}
+  if (EMBED && !mode) mode = 'shared';               // 塾のタブレットの中では「みんなで使う端末」として動かす（保存はしない）
+  const normName = (v) => String(v || '').replace(/[\s\u3000]/g, '');
+  function applyEmbedStudent(f) {
+    if (!embedStudent || !f || f.whoDone) return false;
+    const key = normName(embedStudent.name);
+    const hits = roster.filter((r) => normName(r.name) === key);
+    const s = hits.length === 1 ? hits[0] : null;
+    if (s) {
+      f.student_id = s.id; f.student_name = s.name; f.grade = s.grade; f.other = false;
+      if (s.school) { f.school = C.SCHOOLS.includes(s.school) ? s.school : C.SCHOOL_OTHER; f.schoolOther = C.SCHOOLS.includes(s.school) ? '' : s.school; }
+    } else {
+      f.student_id = null; f.student_name = embedStudent.name; f.grade = embedStudent.grade || ''; f.other = true;
+    }
+    if (!f.school && embedStudent.school) {
+      // 運営アプリの学校名（例: 水谷中・富士見市立本郷中学校）を、この画面の選択肢（例: 水谷）に合わせる
+      const raw = embedStudent.school.replace(/^.*?[市町村]立/, '');
+      const hit = C.SCHOOLS.find((x) => x !== C.SCHOOL_OTHER && raw.startsWith(x));
+      f.school = hit || C.SCHOOL_OTHER; f.schoolOther = hit ? '' : embedStudent.school;
+    }
+    f.whoDone = true; f.pickGrade = f.grade;
+    return true;
+  }
+  if (EMBED) {
+    window.addEventListener('message', (event) => {
+      if (!EMBED_ORIGINS.includes(event.origin)) return;
+      const d = event.data || {};
+      if (d.type !== 'jh-student' || typeof d.name !== 'string' || !d.name.trim()) return;
+      embedStudent = { name: d.name.trim().slice(0, 40), grade: String(d.grade || '').slice(0, 10), school: String(d.school || '').slice(0, 40) };
+      if (view === 'form' && applyEmbedStudent(form)) render();
+    });
+    const pingStudent = () => { if (embedStudent) return; try { window.parent.postMessage({ type: 'jh-student-ready' }, '*'); } catch (_) {} };
+    pingStudent(); const pingTimer = setInterval(() => { if (embedStudent) clearInterval(pingTimer); else pingStudent(); }, 1500);
+  }
+
   async function loadRoster() {
-    try { roster = await api.listStudents(); store.set('jh_roster', roster); }
+    try { roster = await api.listStudents(); store.set('jh_roster', roster); if (EMBED && view === 'form' && form && form.other && embedStudent) { form.whoDone = false; if (applyEmbedStudent(form)) render(); } }
     catch (e) { if (!roster.length) toast(errorText(e), 'error'); }
   }
 
@@ -206,6 +245,7 @@
       thinking: null,                                        // 質問: シンキングした？ (true/false/null)
       whoDone: !!(mode === 'personal' && profile && profile.student_name), pickGrade: p.grade || '', nameQ: '',
     };
+    if (EMBED) applyEmbedStudent(form);
     view = 'form'; render();
     window.scrollTo(0, 0);
   }

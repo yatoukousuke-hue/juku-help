@@ -431,6 +431,20 @@
     if (EMBED) p.set('embed', '1');
     location.href = 'yosou.html' + (p.toString() ? '?' + p.toString() : '');
   }
+  // 運営アプリの「弱点補強プリントを作る」へ（依頼の名前・学年・教科・単元・難しさ・量を渡す）。
+  // 埋め込み中は親（運営アプリ）に postMessage で頼み、そうでなければ運営アプリを新しいタブで開く。
+  function openMakePrint(r) {
+    const unit = [r.unit_name, r.page_range].filter((x) => x && String(x).trim()).join('、');
+    const req = { name: r.student_name || '', grade: r.grade || '', subject: r.subject || '', unit, difficulty: r.difficulty || '', amount: r.amount || '' };
+    if (!req.name) return toast('名前がない依頼です', 'error');
+    if (EMBED && window.parent !== window) {
+      EMBED_PARENTS.forEach((origin) => { try { window.parent.postMessage({ type: 'jh-make-print', request: req }, origin); } catch (_) {} });
+      return;
+    }
+    const base = (C.MANABI_URL || 'https://manabi-operations.vercel.app').replace(/\/+$/, '');
+    const p = new URLSearchParams(Object.entries(req).filter(([, v]) => v));
+    window.open(`${base}/support/print?${p.toString()}`, '_blank', 'noopener');
+  }
   // 教材さがし（自動の候補に無いとき）
   function openMaterialSearch(r) {
     const subj0 = r ? r.subject : '';
@@ -648,6 +662,7 @@
     if (act === 'targets') return openTargetsModal(r);
     if (act === 'msearch') return openMaterialSearch(r);
     if (act === 'yosou') return openYosou(r);
+    if (act === 'makeprint') return openMakePrint(r);
     if (act === 'group') { filterKind = 'print'; filterGrade = r.grade; filterSubject = r.subject; const sc = schoolOf(r); filterSchool = !sc ? '' : (C.SCHOOLS.includes(sc) ? sc : C.SCHOOL_OTHER); sortMode = 'group'; return renderBody(); }
     if (act === 'start') return doUpdate(id, 'start', tname, null, null);
     if (act === 'reopen') return doUpdate(id, 'reopen', null, null, null);
@@ -820,6 +835,7 @@
     parts.push(`<div class="assist-row">📈 ${scoreTxt}${li.rec && r.difficulty && li.rec !== r.difficulty ? `<span class="sub">（依頼は${esc(DIFF_LABEL[r.difficulty] || '')}）</span>` : ''}</div>`);
     if (rt.picked.length) parts.push(`<div class="assist-row">📚 ${LEVEL_JA[rt.level]}：<b>${rt.picked.slice(0, 3).map((m) => esc(m.name)).join('／')}</b>${rt.picked.length > 3 ? `<span class="sub"> ほか${rt.picked.length - 3}</span>` : ''}</div>`);
     if (li.warns.length) parts.push(`<div class="assist-row warn">⚠ ${li.warns.map(esc).join('。')}</div>`);
+    if (r.kind === 'print') parts.push(`<div class="assist-row">🧩 <button class="btn xs" data-act="makeprint" data-id="${r.id}">名前入りの補強プリントを作る</button><span class="sub"> 運営アプリで、この依頼の単元・難しさ・量から問題を作ります</span></div>`);
     if (materialsAll.length) {
       const sg = suggestMaterials(r, 8);
       const hits = sg.filter((x) => x.unitHit), others = sg.filter((x) => !x.unitHit).slice(0, 3);
